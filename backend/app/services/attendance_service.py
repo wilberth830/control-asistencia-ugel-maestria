@@ -39,12 +39,14 @@ class AttendanceService:
         status: str,
         late_minutes: int = 0,
         justification_id: int | None = None,
+        biometric_import_id: int | None = None,
     ) -> dict[str, Any]:
         self._validate(status, late_minutes)
         parsed_date = self._parse_date(attendance_date)
         try:
             return attendance_day_repository.upsert(
                 staff_member_id=staff_member_id,
+                biometric_import_id=biometric_import_id,
                 attendance_date=parsed_date,
                 status=status,
                 late_minutes=late_minutes,
@@ -53,12 +55,13 @@ class AttendanceService:
         except OracleRepositoryError:
             pass
 
-        key = self._key(staff_member_id, parsed_date.isoformat())
+        key = self._key(staff_member_id, parsed_date.isoformat(), biometric_import_id)
         old = self._days.get(key)
         row_id = old["id"] if old else self._next_id()
         row = {
             "id": row_id,
             "staff_member_id": staff_member_id,
+            "biometric_import_id": biometric_import_id,
             "attendance_date": parsed_date.isoformat(),
             "status": status,
             "late_minutes": late_minutes,
@@ -89,6 +92,34 @@ class AttendanceService:
             )
             current = date.fromordinal(current.toordinal() + 1)
         return rows
+
+    def bulk_upsert_days(self, rows: list[dict[str, Any]]) -> None:
+        payload = []
+        for row in rows:
+            self._validate(row["status"], row.get("late_minutes", 0))
+            payload.append(
+                {
+                    **row,
+                    "attendance_date": self._parse_date(row["attendance_date"]),
+                    "late_minutes": row.get("late_minutes", 0),
+                    "justification_id": row.get("justification_id"),
+                }
+            )
+        try:
+            attendance_day_repository.bulk_upsert(payload)
+            return
+        except OracleRepositoryError:
+            pass
+
+        for row in rows:
+            self.upsert_day(
+                staff_member_id=row["staff_member_id"],
+                attendance_date=row["attendance_date"],
+                status=row["status"],
+                late_minutes=row.get("late_minutes", 0),
+                justification_id=row.get("justification_id"),
+                biometric_import_id=row.get("biometric_import_id"),
+            )
 
     def cancel_justification(self, justification_id: int) -> list[dict[str, Any]]:
         try:
@@ -128,6 +159,8 @@ class AttendanceService:
         for row in self._days.values():
             if not str(row["attendance_date"]).startswith(prefix):
                 continue
+            if import_id and row.get("biometric_import_id") != import_id:
+                continue
             if staff_member_id and row["staff_member_id"] != staff_member_id:
                 continue
             out.append(deepcopy(row))
@@ -151,8 +184,13 @@ class AttendanceService:
         self._seq += 1
         return self._seq
 
-    def _key(self, staff_member_id: int, attendance_date: str) -> str:
-        return f"{staff_member_id}:{attendance_date}"
+    def _key(
+        self,
+        staff_member_id: int,
+        attendance_date: str,
+        biometric_import_id: int | None = None,
+    ) -> str:
+        return f"{staff_member_id}:{attendance_date}:{biometric_import_id or 0}"
 
 
 attendance_service = AttendanceService()

@@ -29,6 +29,7 @@ def list_records(
 
 class DayUpdate(BaseModel):
     staff_member_id: int
+    biometric_import_id: int | None = None
     attendance_date: str
     status: str
     late_minutes: int = Field(default=0, ge=0)
@@ -45,6 +46,7 @@ def update_day(body: DayUpdate, session: dict = Depends(require_token)):
             body.status,
             body.late_minutes,
             body.justification_id,
+            body.biometric_import_id,
         )
     except AttendanceValidationError as exc:
         raise HTTPException(status_code=400, detail="Invalid attendance day") from exc

@@ -84,6 +84,7 @@ type BiometricImport = {
 type AttendanceDay = {
   id: number;
   staff_member_id: number;
+  biometric_import_id?: number | null;
   attendance_date: string;
   status: string;
   late_minutes: number;
@@ -224,15 +225,18 @@ function Shell({
   onLogout: () => void;
 }) {
   const location = useLocation();
+  const [loggingOut, setLoggingOut] = useState(false);
   const title = navigationItems.find((item) =>
     location.pathname.startsWith(item.to),
   )?.label;
 
   const logout = async () => {
+    setLoggingOut(true);
     try {
       await apiClient.delete("/api/v1/auth/sessions/current");
     } finally {
       onLogout();
+      setLoggingOut(false);
     }
   };
 
@@ -268,8 +272,14 @@ function Shell({
                 <div className="role">{session.role}</div>
               </div>
             </div>
-            <button className="btn btn-sm btn-ghost" type="button" onClick={logout}>
-              Salir
+            <button
+              className="btn btn-sm btn-ghost"
+              disabled={loggingOut}
+              type="button"
+              onClick={logout}
+            >
+              {loggingOut && <span className="btn-spinner" />}
+              {loggingOut ? "Saliendo" : "Salir"}
             </button>
           </div>
         </header>
@@ -526,6 +536,7 @@ function ImportPage() {
   const [imports, setImports] = useState<BiometricImport[]>([]);
   const [rowDrafts, setRowDrafts] = useState<Record<number, ImportRowDraft>>({});
   const [loading, setLoading] = useState(false);
+  const [importAction, setImportAction] = useState("");
   const [rowLoadingId, setRowLoadingId] = useState<number | null>(null);
   const [processingLabel, setProcessingLabel] = useState("");
   const [message, setMessage] = useState("");
@@ -584,6 +595,7 @@ function ImportPage() {
     const formData = new FormData();
     formData.append("file", file);
     setLoading(true);
+    setImportAction("process");
     setError("");
     setMessage("");
     setProcessingLabel("Leyendo archivo y validando DNI");
@@ -604,6 +616,7 @@ function ImportPage() {
       setError("No se pudo subir el archivo. Verifica formato y sesión.");
     } finally {
       setLoading(false);
+      setImportAction("");
       setProcessingLabel("");
     }
   };
@@ -611,6 +624,7 @@ function ImportPage() {
   const confirmImport = async () => {
     if (!currentImport) return;
     setLoading(true);
+    setImportAction("confirm");
     setProcessingLabel("Confirmando carga y consolidando asistencia");
     setError("");
     setMessage("");
@@ -634,6 +648,7 @@ function ImportPage() {
       setError("No se pudo confirmar la carga.");
     } finally {
       setLoading(false);
+      setImportAction("");
       setProcessingLabel("");
     }
   };
@@ -641,6 +656,7 @@ function ImportPage() {
   const cancelImport = async () => {
     if (!currentImport) return;
     setLoading(true);
+    setImportAction("cancel");
     setProcessingLabel("Anulando carga");
     setError("");
     setMessage("");
@@ -658,6 +674,7 @@ function ImportPage() {
       setError("Solo puedes anular una carga confirmada.");
     } finally {
       setLoading(false);
+      setImportAction("");
       setProcessingLabel("");
     }
   };
@@ -796,7 +813,12 @@ function ImportPage() {
               onClick={uploadFile}
               type="button"
             >
-              {selectedFile ? "Procesar otra vez" : "Seleccionar archivo"}
+              {importAction === "process" && <span className="btn-spinner" />}
+              {importAction === "process"
+                ? "Procesando"
+                : selectedFile
+                  ? "Procesar otra vez"
+                  : "Seleccionar archivo"}
             </button>
             <button
               className="btn btn-secondary"
@@ -804,7 +826,8 @@ function ImportPage() {
               onClick={confirmImport}
               type="button"
             >
-              Confirmar carga
+              {importAction === "confirm" && <span className="btn-spinner" />}
+              {importAction === "confirm" ? "Confirmando" : "Confirmar carga"}
             </button>
             <button
               className="btn btn-danger-outline"
@@ -812,7 +835,8 @@ function ImportPage() {
               onClick={cancelImport}
               type="button"
             >
-              Anular carga
+              {importAction === "cancel" && <span className="btn-spinner" />}
+              {importAction === "cancel" ? "Anulando" : "Anular carga"}
             </button>
           </div>
         </div>
@@ -983,7 +1007,8 @@ function ImportRowsTable({
                           onClick={() => onPatchRow(row, "research")}
                           type="button"
                         >
-                          Rebuscar
+                          {rowLoadingId === row.row_id && <span className="btn-spinner" />}
+                          {rowLoadingId === row.row_id ? "Buscando" : "Rebuscar"}
                         </button>
                       </div>
                     ) : (
@@ -1016,26 +1041,33 @@ function AttendancePage() {
   const [selectedImportId, setSelectedImportId] = useState(
     importId ? Number(importId) : 0,
   );
+  const [allImports, setAllImports] = useState<BiometricImport[]>([]);
   const [monthImports, setMonthImports] = useState<BiometricImport[]>([]);
   const [attendanceRows, setAttendanceRows] = useState<AttendanceDay[]>([]);
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
   const [selectedDay, setSelectedDay] = useState<AttendanceDay | null>(null);
   const [selectedStatus, setSelectedStatus] = useState("present");
   const [lateMinutes, setLateMinutes] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [savingDay, setSavingDay] = useState(false);
+  const [lockedDayKey, setLockedDayKey] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  const loadAttendance = async () => {
+  const loadAttendance = async (
+    nextMonth = month,
+    nextYear = year,
+    nextImportId = selectedImportId,
+  ) => {
     setLoading(true);
     setError("");
     try {
       const [attendanceResponse, staffResponse] = await Promise.all([
         apiClient.get<AttendanceDay[]>("/api/v1/attendance-records", {
           params: {
-            month,
-            year,
-            import_id: selectedImportId || undefined,
+            month: nextMonth,
+            year: nextYear,
+            import_id: nextImportId || undefined,
           },
         }),
         apiClient.get<StaffMember[]>("/api/v1/staff-members", {
@@ -1047,6 +1079,7 @@ function AttendancePage() {
       setSelectedDay(attendanceResponse.data[0] ?? null);
       setSelectedStatus(attendanceResponse.data[0]?.status ?? "present");
       setLateMinutes(attendanceResponse.data[0]?.late_minutes ?? 0);
+      setLockedDayKey("");
     } catch {
       setError("No se pudo cargar la asistencia.");
     } finally {
@@ -1057,31 +1090,45 @@ function AttendancePage() {
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      apiClient.get<AttendanceDay[]>("/api/v1/attendance-records", {
-        params: {
-          month: initialMonth,
-          year: initialYear,
-          import_id: selectedImportId || undefined,
-        },
-      }),
+      apiClient.get<BiometricImport[]>("/api/v1/biometric-imports"),
       apiClient.get<StaffMember[]>("/api/v1/staff-members", {
         params: { is_active: "Y" },
       }),
-      apiClient.get<BiometricImport[]>("/api/v1/biometric-imports", {
-        params: { month: initialMonth, year: initialYear, status: "confirmed" },
-      }),
     ])
-      .then(([attendanceResponse, staffResponse, importsResponse]) => {
+      .then(async ([importsResponse, staffResponse]) => {
+        if (cancelled) return;
+        const imports = importsResponse.data;
+        const selectedPeriod = periodFromImports(imports, initialMonth, initialYear);
+        const importsForMonth = imports.filter((item) =>
+          importTouchesPeriod(item, selectedPeriod.month, selectedPeriod.year),
+        );
+        const nextImportId =
+          importId && imports.some((item) => item.id === Number(importId))
+            ? Number(importId)
+            : importsForMonth[0]?.id ?? 0;
+
+        setAllImports(imports);
+        setMonth(selectedPeriod.month);
+        setYear(selectedPeriod.year);
+        setMonthImports(importsForMonth);
+        setSelectedImportId(nextImportId);
+        setStaffMembers(staffResponse.data);
+        const attendanceResponse = await apiClient.get<AttendanceDay[]>(
+          "/api/v1/attendance-records",
+          {
+            params: {
+              month: selectedPeriod.month,
+              year: selectedPeriod.year,
+              import_id: nextImportId || undefined,
+            },
+          },
+        );
         if (cancelled) return;
         setAttendanceRows(attendanceResponse.data);
-        setStaffMembers(staffResponse.data);
-        setMonthImports(importsResponse.data);
-        if (!selectedImportId && importsResponse.data[0]) {
-          setSelectedImportId(importsResponse.data[0].id);
-        }
         setSelectedDay(attendanceResponse.data[0] ?? null);
         setSelectedStatus(attendanceResponse.data[0]?.status ?? "present");
         setLateMinutes(attendanceResponse.data[0]?.late_minutes ?? 0);
+        setLockedDayKey("");
       })
       .catch(() => {
         if (!cancelled) setError("No se pudo cargar la asistencia.");
@@ -1092,33 +1139,48 @@ function AttendancePage() {
     return () => {
       cancelled = true;
     };
-  }, [initialMonth, initialYear, selectedImportId]);
+  }, [importId, initialMonth, initialYear]);
 
-  const loadMonthImports = async (nextMonth: number, nextYear: number) => {
-    try {
-      const response = await apiClient.get<BiometricImport[]>(
-        "/api/v1/biometric-imports",
-        { params: { month: nextMonth, year: nextYear, status: "confirmed" } },
-      );
-      setMonthImports(response.data);
-      setSelectedImportId(response.data[0]?.id ?? 0);
-    } catch {
-      setMonthImports([]);
-      setSelectedImportId(0);
-    }
+  const loadMonthImports = (nextMonth: number, nextYear: number) => {
+    const importsForMonth = allImports.filter((item) =>
+      importTouchesPeriod(item, nextMonth, nextYear),
+    );
+    const nextImportId = importsForMonth.some((item) => item.id === selectedImportId)
+      ? selectedImportId
+      : importsForMonth[0]?.id ?? 0;
+    setMonthImports(importsForMonth);
+    setSelectedImportId(nextImportId);
+  };
+
+  const selectImport = (nextImportId: number) => {
+    setSelectedImportId(nextImportId);
+  };
+
+  const applyAttendanceFilters = async () => {
+    const importsForMonth = allImports.filter((item) =>
+      importTouchesPeriod(item, month, year),
+    );
+    const nextImportId = importsForMonth.some((item) => item.id === selectedImportId)
+      ? selectedImportId
+      : importsForMonth[0]?.id ?? 0;
+    setMonthImports(importsForMonth);
+    setSelectedImportId(nextImportId);
+    await loadAttendance(month, year, nextImportId);
   };
 
   const selectDay = (row: AttendanceDay) => {
     setSelectedDay(row);
     setSelectedStatus(row.status);
     setLateMinutes(row.late_minutes);
+    setLockedDayKey("");
     setMessage("");
     setError("");
   };
 
   const saveDay = async () => {
     if (!selectedDay) return;
-    setLoading(true);
+    const dayKey = `${selectedDay.staff_member_id}-${selectedDay.attendance_date}`;
+    setSavingDay(true);
     setError("");
     setMessage("");
     try {
@@ -1126,6 +1188,8 @@ function AttendancePage() {
         "/api/v1/attendance-records/days",
         {
           staff_member_id: selectedDay.staff_member_id,
+          biometric_import_id:
+            selectedDay.biometric_import_id ?? (selectedImportId || null),
           attendance_date: selectedDay.attendance_date,
           status: selectedStatus,
           late_minutes: lateMinutes,
@@ -1136,15 +1200,23 @@ function AttendancePage() {
         rows.map((row) => (row.id === response.data.id ? response.data : row)),
       );
       setSelectedDay(response.data);
+      setLockedDayKey(dayKey);
       setMessage("Día actualizado");
     } catch {
       setError("No se pudo guardar el día.");
     } finally {
-      setLoading(false);
+      setSavingDay(false);
     }
   };
 
   const staffById = Object.fromEntries(staffMembers.map((staff) => [staff.id, staff]));
+  const selectedStaff = selectedDay ? staffById[selectedDay.staff_member_id] : null;
+  const selectedDayKey = selectedDay
+    ? `${selectedDay.staff_member_id}-${selectedDay.attendance_date}`
+    : "";
+  const fieldsLocked = !selectedDay || savingDay || lockedDayKey === selectedDayKey;
+  const availableYears = yearsFromImports(allImports, year);
+  const availableMonths = monthsFromImports(allImports, year, month);
 
   return (
     <>
@@ -1172,9 +1244,11 @@ function AttendancePage() {
             }}
             value={month}
           >
-            <option value="7">Julio</option>
-            <option value="6">Junio</option>
-            <option value="5">Mayo</option>
+            {availableMonths.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
           </select>
         </label>
         <label className="form-field">
@@ -1182,24 +1256,30 @@ function AttendancePage() {
           <select
             onChange={(event) => {
               const nextYear = Number(event.target.value);
+              const nextMonth = monthsFromImports(allImports, nextYear, month)[0].value;
               setYear(nextYear);
-              loadMonthImports(month, nextYear);
+              setMonth(nextMonth);
+              loadMonthImports(nextMonth, nextYear);
             }}
             value={year}
           >
-            <option value="2026">2026</option>
+            {availableYears.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
           </select>
         </label>
         <label className="form-field grow">
           <span>Archivo</span>
           <select
-            onChange={(event) => setSelectedImportId(Number(event.target.value))}
+            onChange={(event) => selectImport(Number(event.target.value))}
             value={selectedImportId}
           >
             <option value="0">Todos los archivos del mes</option>
             {monthImports.map((item) => (
               <option key={item.id} value={item.id}>
-                #{item.id} · {item.file_name}
+                #{item.id} · {item.file_name} · {statusText(item.status)}
               </option>
             ))}
           </select>
@@ -1208,10 +1288,11 @@ function AttendancePage() {
           <button
             className="btn btn-sm btn-primary"
             disabled={loading}
-            onClick={loadAttendance}
+            onClick={applyAttendanceFilters}
             type="button"
           >
-            Aplicar
+            {loading && <span className="btn-spinner" />}
+            {loading ? "Filtrando" : "Filtrar"}
           </button>
         </div>
       </div>
@@ -1231,21 +1312,34 @@ function AttendancePage() {
           />
         </section>
         <section className="card attendance-panel">
-          <div className="card-header">Día</div>
+          <div className="card-header">Editar</div>
           <div className="card-body panel-stack">
-            <KpiCard
-              label="Fecha"
-              value={selectedDay?.attendance_date ?? "-"}
-              trend={
-                selectedDay
-                  ? staffById[selectedDay.staff_member_id]?.dni ?? "Personal"
-                  : "Seleccione una fila"
-              }
-            />
+            <div className="edit-summary">
+              <div>
+                <span>Personal</span>
+                <strong>
+                  {selectedStaff
+                    ? `${selectedStaff.last_names}, ${selectedStaff.first_names}`
+                    : selectedDay
+                      ? `ID ${selectedDay.staff_member_id}`
+                      : "Seleccione una celda"}
+                </strong>
+              </div>
+              <div className="edit-summary-grid">
+                <div>
+                  <span>DNI</span>
+                  <strong>{selectedStaff?.dni ?? "-"}</strong>
+                </div>
+                <div>
+                  <span>Fecha</span>
+                  <strong>{selectedDay?.attendance_date ?? "-"}</strong>
+                </div>
+              </div>
+            </div>
             <label className="form-field">
               <span>Estado</span>
               <select
-                disabled={!selectedDay}
+                disabled={fieldsLocked}
                 onChange={(event) => setSelectedStatus(event.target.value)}
                 value={selectedStatus}
               >
@@ -1259,7 +1353,7 @@ function AttendancePage() {
             <label className="form-field">
               <span>Minutos tardanza</span>
               <input
-                disabled={!selectedDay}
+                disabled={fieldsLocked}
                 min="0"
                 onChange={(event) => setLateMinutes(Number(event.target.value))}
                 type="number"
@@ -1268,11 +1362,16 @@ function AttendancePage() {
             </label>
             <button
               className="btn btn-secondary"
-              disabled={!selectedDay || loading}
+              disabled={!selectedDay || savingDay || lockedDayKey === selectedDayKey}
               onClick={saveDay}
               type="button"
             >
-              Guardar día
+              {savingDay && <span className="btn-spinner" />}
+              {savingDay
+                ? "Guardando"
+                : lockedDayKey === selectedDayKey
+                  ? "Guardado"
+                  : "Guardar"}
             </button>
           </div>
         </section>
@@ -1558,6 +1657,21 @@ const attendanceStatuses = [
   { value: "permission", label: "Permiso" },
 ];
 
+const monthOptions = [
+  { value: 1, label: "Enero" },
+  { value: 2, label: "Febrero" },
+  { value: 3, label: "Marzo" },
+  { value: 4, label: "Abril" },
+  { value: 5, label: "Mayo" },
+  { value: 6, label: "Junio" },
+  { value: 7, label: "Julio" },
+  { value: 8, label: "Agosto" },
+  { value: 9, label: "Septiembre" },
+  { value: 10, label: "Octubre" },
+  { value: 11, label: "Noviembre" },
+  { value: 12, label: "Diciembre" },
+];
+
 function statusText(status: string) {
   const labels: Record<string, string> = {
     draft: "Borrador",
@@ -1565,6 +1679,58 @@ function statusText(status: string) {
     cancelled: "Anulada",
   };
   return labels[status] ?? status;
+}
+
+function importTouchesPeriod(item: BiometricImport, month: number, year: number) {
+  const prefix = `${year}-${String(month).padStart(2, "0")}`;
+  return (
+    String(item.period_start ?? "").startsWith(prefix) ||
+    String(item.period_end ?? "").startsWith(prefix)
+  );
+}
+
+function periodFromImports(
+  imports: BiometricImport[],
+  fallbackMonth: number,
+  fallbackYear: number,
+) {
+  const firstImport = imports.find((item) => item.period_start || item.period_end);
+  const period = firstImport?.period_start ?? firstImport?.period_end;
+  if (!period) return { month: fallbackMonth, year: fallbackYear };
+  return {
+    month: Number(period.slice(5, 7)),
+    year: Number(period.slice(0, 4)),
+  };
+}
+
+function yearsFromImports(imports: BiometricImport[], fallbackYear: number) {
+  const years = new Set<number>();
+  imports.forEach((item) => {
+    if (item.period_start) years.add(Number(item.period_start.slice(0, 4)));
+    if (item.period_end) years.add(Number(item.period_end.slice(0, 4)));
+  });
+  return years.size ? [...years].sort((a, b) => b - a) : [fallbackYear];
+}
+
+function monthsFromImports(
+  imports: BiometricImport[],
+  selectedYear: number,
+  fallbackMonth: number,
+) {
+  const months = new Set<number>();
+  imports.forEach((item) => {
+    if (item.period_start?.startsWith(`${selectedYear}-`)) {
+      months.add(Number(item.period_start.slice(5, 7)));
+    }
+    if (item.period_end?.startsWith(`${selectedYear}-`)) {
+      months.add(Number(item.period_end.slice(5, 7)));
+    }
+  });
+  const values = months.size ? [...months].sort((a, b) => b - a) : [fallbackMonth];
+  return values.map((value) => ({
+    value,
+    label: monthOptions.find((item) => item.value === value)?.label ?? String(value),
+  }));
 }
 
 function markTypeText(markType: string) {

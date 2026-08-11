@@ -24,10 +24,11 @@ EXPECTED_TABLES = [
 
 EXPECTED_STATEMENTS = [
     "CONSTRAINT ck_staff_member_dni_len CHECK (REGEXP_LIKE(dni, '^[0-9]{8}$'))",
-    "CONSTRAINT uk_ad_staff_date UNIQUE (staff_member_id, attendance_date)",
+    "CONSTRAINT uk_ad_staff_date_import UNIQUE (staff_member_id, attendance_date, biometric_import_id)",
     "CONSTRAINT ck_bi_status CHECK (status IN ('draft', 'confirmed', 'cancelled'))",
     "CONSTRAINT uk_institution_modular_code UNIQUE (modular_code)",
     "CREATE INDEX ix_biometric_import_status ON biometric_import (status, period_start)",
+    "CREATE INDEX ix_attendance_day_import ON attendance_day (biometric_import_id, attendance_date)",
     "CREATE INDEX ix_audit_log_entity ON audit_log (entity_name, entity_id)",
     "MERGE INTO user_account target",
     "MERGE INTO institution target",

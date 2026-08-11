@@ -132,31 +132,45 @@ class BiometricImportService:
                 continue
             if row.get("match") == "new" and not row.get("staff_member_id"):
                 self._register_new_staff(row)
-                self._apply_match(row)
-                row["resolved"] = row["match"] == "matched"
+        self._apply_matches(imp["rows"])
+        for row in imp["rows"]:
+            if row.get("match") == "matched":
+                row["resolved"] = True
         self._refresh_counters(imp)
         imp["status"] = "confirmed"
         imp["ok_rows"] = sum(1 for row in imp["rows"] if not row.get("skipped"))
         imp["error_rows"] = sum(1 for row in imp["rows"] if row.get("skipped"))
+        mark_rows = []
+        attendance_rows_by_key: dict[tuple[int, str], dict[str, Any]] = {}
+        for row in imp["rows"]:
+            if row.get("skipped") or not row.get("staff_member_id"):
+                continue
+            marked_at = datetime.fromisoformat(str(row["marked_at"]))
+            mark_rows.append(
+                {
+                    "staff_member_id": row["staff_member_id"],
+                    "biometric_import_id": imp["id"],
+                    "marked_at": marked_at,
+                    "mark_type": row["mark_type"],
+                    "status": "valid",
+                }
+            )
+            if row["mark_type"] == "entry":
+                attendance_date = str(row["marked_at"])[:10]
+                attendance_rows_by_key[(row["staff_member_id"], attendance_date)] = {
+                    "staff_member_id": row["staff_member_id"],
+                    "biometric_import_id": imp["id"],
+                    "attendance_date": attendance_date,
+                    "status": "present",
+                    "late_minutes": 0,
+                    "justification_id": None,
+                }
         try:
-            for row in imp["rows"]:
-                if row.get("skipped") or not row.get("staff_member_id"):
-                    continue
-                biometric_repository.insert_mark(
-                    staff_member_id=row["staff_member_id"],
-                    biometric_import_id=imp["id"],
-                    marked_at=datetime.fromisoformat(str(row["marked_at"])),
-                    mark_type=row["mark_type"],
-                    status="valid",
-                )
-                if row["mark_type"] == "entry":
-                    attendance_service.upsert_day(
-                        staff_member_id=row["staff_member_id"],
-                        attendance_date=str(row["marked_at"])[:10],
-                        status="present",
-                        late_minutes=0,
-                        justification_id=None,
-                    )
+            biometric_repository.insert_marks(mark_rows)
+        except OracleRepositoryError:
+            pass
+        attendance_service.bulk_upsert_days(list(attendance_rows_by_key.values()))
+        try:
             persisted = biometric_repository.update_import(imp["id"], imp)
             if persisted:
                 imp.update(persisted)
@@ -286,10 +300,10 @@ class BiometricImportService:
             }
             if row["mark_type"] not in {"entry", "exit"}:
                 raise BiometricImportError("invalid_file")
-            self._apply_match(row)
             rows.append(row)
         if not rows:
             raise BiometricImportError("invalid_file")
+        self._apply_matches(rows)
         return rows
 
     def _field_map(self, fieldnames: list[str]) -> dict[str, str]:
@@ -339,6 +353,19 @@ class BiometricImportService:
         else:
             row["match"] = "new"
             row["staff_member_id"] = None
+
+    def _apply_matches(self, rows: list[dict[str, Any]]) -> None:
+        staff_by_dni = staff_member_service.get_by_dnis([row["dni"] for row in rows])
+        for row in rows:
+            staff_member = staff_by_dni.get(row["dni"])
+            if staff_member:
+                row["match"] = "matched"
+                row["staff_member_id"] = staff_member["id"]
+                row["resolved"] = True
+                row["skipped"] = False
+            else:
+                row["match"] = "new"
+                row["staff_member_id"] = None
 
     def _register_new_staff(self, row: dict[str, Any]) -> None:
         try:

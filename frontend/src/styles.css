@@ -62,6 +62,11 @@ select {
   white-space: nowrap;
 }
 
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
 .btn:focus-visible,
 .form-field input:focus,
 .form-field select:focus {
@@ -963,6 +968,53 @@ tbody tr:last-child td {
 .panel-stack {
   display: grid;
   gap: 12px;
+}
+
+.edit-summary {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.edit-summary span {
+  color: var(--text-muted);
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 2px;
+  text-transform: uppercase;
+}
+
+.edit-summary strong {
+  color: var(--text);
+  display: block;
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.edit-summary-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.btn-spinner {
+  animation: spin 0.75s linear infinite;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  height: 14px;
+  width: 14px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .form-grid {

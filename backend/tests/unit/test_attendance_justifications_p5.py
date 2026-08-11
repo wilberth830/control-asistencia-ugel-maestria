@@ -52,6 +52,65 @@ def test_upsert_attendance_day_and_list_month(auth_headers: dict[str, str]) -> N
     assert list_response.json()[0]["status"] == "late"
 
 
+def test_update_attendance_is_scoped_by_import(auth_headers: dict[str, str]) -> None:
+    client = TestClient(app)
+
+    first_response = client.put(
+        "/api/v1/attendance-records/days",
+        json={
+            "staff_member_id": 1,
+            "biometric_import_id": 10,
+            "attendance_date": "2026-07-03",
+            "status": "late",
+            "late_minutes": 8,
+        },
+        headers=auth_headers,
+    )
+    second_response = client.put(
+        "/api/v1/attendance-records/days",
+        json={
+            "staff_member_id": 1,
+            "biometric_import_id": 20,
+            "attendance_date": "2026-07-03",
+            "status": "present",
+            "late_minutes": 0,
+        },
+        headers=auth_headers,
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+
+    update_first_response = client.put(
+        "/api/v1/attendance-records/days",
+        json={
+            "staff_member_id": 1,
+            "biometric_import_id": 10,
+            "attendance_date": "2026-07-03",
+            "status": "absent",
+            "late_minutes": 0,
+        },
+        headers=auth_headers,
+    )
+
+    assert update_first_response.status_code == 200
+    assert update_first_response.json()["id"] == first_response.json()["id"]
+
+    first_list = client.get(
+        "/api/v1/attendance-records",
+        params={"month": 7, "year": 2026, "import_id": 10},
+        headers=auth_headers,
+    ).json()
+    second_list = client.get(
+        "/api/v1/attendance-records",
+        params={"month": 7, "year": 2026, "import_id": 20},
+        headers=auth_headers,
+    ).json()
+
+    assert first_list[0]["status"] == "absent"
+    assert second_list[0]["status"] == "present"
+
+
 def test_create_justification_applies_attendance_range(
     auth_headers: dict[str, str],
 ) -> None:

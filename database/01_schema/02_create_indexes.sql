@@ -75,6 +75,8 @@ BEGIN
         'CREATE INDEX ix_justification_staff ON justification (staff_member_id, status)');
     create_index_if_missing('ix_attendance_day_date', 'attendance_day', 'attendance_date',
         'CREATE INDEX ix_attendance_day_date ON attendance_day (attendance_date)');
+    create_index_if_missing('ix_attendance_day_import', 'attendance_day', 'biometric_import_id,attendance_date',
+        'CREATE INDEX ix_attendance_day_import ON attendance_day (biometric_import_id, attendance_date)');
     create_index_if_missing('ix_audit_log_entity', 'audit_log', 'entity_name,entity_id',
         'CREATE INDEX ix_audit_log_entity ON audit_log (entity_name, entity_id)');
 END;

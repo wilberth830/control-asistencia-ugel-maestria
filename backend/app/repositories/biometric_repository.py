@@ -159,6 +159,24 @@ class BiometricRepository:
         except oracledb.Error as exc:
             raise OracleRepositoryError("Biometric mark insert failed") from exc
 
+    def insert_marks(self, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        sql = """
+            INSERT INTO biometric_mark (
+                staff_member_id, biometric_import_id, marked_at, mark_type, status
+            ) VALUES (
+                :staff_member_id, :biometric_import_id, :marked_at, :mark_type, :status
+            )
+        """
+        try:
+            with oracle_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.executemany(sql, rows)
+                connection.commit()
+        except oracledb.Error as exc:
+            raise OracleRepositoryError("Biometric mark bulk insert failed") from exc
+
     def list_marks(self) -> list[dict[str, Any]]:
         sql = """
             SELECT id, staff_member_id, biometric_import_id, marked_at,

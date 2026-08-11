@@ -49,6 +49,27 @@ class StaffMemberRepository:
     def get_by_dni(self, dni: str) -> dict[str, Any] | None:
         return self._get_by("dni = :value", dni)
 
+    def get_by_dnis(self, dnis: list[str]) -> dict[str, dict[str, Any]]:
+        unique_dnis = sorted({dni for dni in dnis if dni})
+        if not unique_dnis:
+            return {}
+        binds = {f"dni_{index}": dni for index, dni in enumerate(unique_dnis)}
+        placeholders = ", ".join(f":{key}" for key in binds)
+        sql = f"""
+            SELECT id, dni, last_names, first_names, job_title,
+                   employment_status, is_active, registered_at
+            FROM staff_member
+            WHERE dni IN ({placeholders})
+        """
+        try:
+            with oracle_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(sql, **binds)
+                    rows = [self._row(row) for row in cursor.fetchall()]
+                    return {row["dni"]: row for row in rows}
+        except oracledb.Error as exc:
+            raise OracleRepositoryError("Staff bulk lookup failed") from exc
+
     def create(self, data: dict[str, Any]) -> dict[str, Any]:
         sql = """
             INSERT INTO staff_member (

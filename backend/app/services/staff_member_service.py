@@ -106,6 +106,17 @@ class StaffMemberService:
                 return deepcopy(row)
         return None
 
+    def get_by_dnis(self, dnis: list[str]) -> dict[str, dict[str, Any]]:
+        try:
+            return staff_member_repository.get_by_dnis(dnis)
+        except OracleRepositoryError:
+            pass
+
+        requested = set(dnis)
+        return {
+            row["dni"]: deepcopy(row) for row in self._rows if row["dni"] in requested
+        }
+
     def create(self, data: dict[str, Any]) -> dict[str, Any]:
         try:
             return staff_member_repository.create(data)
