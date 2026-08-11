@@ -2057,18 +2057,26 @@ function JustificationsPage() {
                 value={reason}
               />
             </label>
-            <label className="form-field full-width">
+            <div className="form-field full-width">
               <span>Sustento Adjunto (PDF/Imagen, máximo 5 MB)</span>
-              <input
-                accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
-                key={fileInputKey}
-                onChange={changeSupportFile}
-                type="file"
-              />
-              {supportFile && (
-                <small className="file-caption">Seleccionado: {supportFile.name}</small>
-              )}
-            </label>
+              <label className="file-upload-control">
+                <input
+                  accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
+                  className="file-upload-input"
+                  key={fileInputKey}
+                  onChange={changeSupportFile}
+                  type="file"
+                />
+                <span className="file-upload-button">
+                  <span aria-hidden="true" className="file-upload-icon">↑</span>
+                  Seleccionar archivo
+                </span>
+                <span className={`file-upload-name ${supportFile ? "has-file" : ""}`}>
+                  {supportFile ? supportFile.name : "Ningún archivo seleccionado"}
+                </span>
+              </label>
+              <small className="file-caption">Formatos permitidos: PDF, JPG, PNG o WEBP.</small>
+            </div>
           </div>
           <div className="justification-actions">
             <button
