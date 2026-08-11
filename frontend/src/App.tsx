@@ -121,6 +121,23 @@ type AttendanceDay = {
   justification_id: number | null;
 };
 
+type Annex03Report = {
+  institution: {
+    ugel: string;
+    school_name: string;
+    modular_code: string;
+    education_level: string;
+    shift_name: string;
+  };
+  period: { month: number; year: number };
+  rows: Array<{
+    staff_member_id: number;
+    dni: string;
+    full_name: string;
+    days: AttendanceDay[];
+  }>;
+};
+
 const STORAGE_KEY = "chiquistrukis.session";
 
 const navigationItems = [
@@ -1533,33 +1550,133 @@ function JustificationsPage() {
 }
 
 function ReportsPage() {
+  const [month, setMonth] = useState(7);
+  const [year, setYear] = useState(2026);
+  const [report, setReport] = useState<Annex03Report | null>(null);
+  const [previewSheet, setPreviewSheet] = useState<"attendance" | "consolidated">("attendance");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const generatePreview = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await apiClient.get<Annex03Report>("/api/v1/reports/annex-03", {
+        params: { month, year, format: "json" },
+      });
+      setReport(response.data);
+    } catch {
+      setError("No se pudo generar la vista previa del reporte.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const downloadExcel = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await apiClient.get("/api/v1/reports/monthly-export", {
+        params: { month, year },
+        responseType: "blob",
+      });
+      const url = URL.createObjectURL(response.data as Blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `asistencia_${year}_${String(month).padStart(2, "0")}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("No se pudo descargar el archivo Excel.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const previewRows = (report?.rows ?? []).map((row, index) => {
+    const counts = row.days.reduce<Record<string, number>>((result, day) => {
+      result[day.status] = (result[day.status] ?? 0) + 1;
+      return result;
+    }, {});
+    const lateMinutes = row.days.reduce(
+      (total, day) => total + (day.status === "late" ? day.late_minutes : 0), 0,
+    );
+    return { ...row, index: index + 1, counts, lateMinutes };
+  });
+
   return (
     <>
       <PageHeader
         title="Reportes"
-        description="Vista previa de Anexo 03 y Anexo 04 desde asistencia"
+        description="Exportación mensual de asistencia y reporte consolidado"
       />
-      <div className="report-layout">
-        <section className="card report-filter">
-          <div className="card-header">Filtros</div>
-          <div className="card-body">
-            <Filters vertical />
-            <button className="btn btn-primary btn-block" type="button">
-              Generar
+      <section className="report-toolbar card">
+        <div className="card-body report-toolbar-content">
+          <label className="form-field">
+            <span>Asistencia</span>
+            <select value="monthly" disabled>
+              <option value="monthly">Anexo 03 + Anexo 04</option>
+            </select>
+          </label>
+          <label className="form-field">
+            <span>Mes</span>
+            <select onChange={(event) => setMonth(Number(event.target.value))} value={month}>
+              {monthOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+          </label>
+          <label className="form-field">
+            <span>Año</span>
+            <select onChange={(event) => setYear(Number(event.target.value))} value={year}>
+              <option value="2026">2026</option>
+              <option value="2025">2025</option>
+            </select>
+          </label>
+          <label className="form-field">
+            <span>Archivo</span>
+            <select value="xlsx" disabled><option value="xlsx">Excel (.xlsx)</option></select>
+          </label>
+          <div className="report-actions">
+            <button className="btn btn-secondary" disabled={loading} onClick={generatePreview} type="button">
+              {loading ? "Generando..." : "Previsualizar"}
+            </button>
+            <button className="btn btn-primary" disabled={loading} onClick={downloadExcel} type="button">
+              Descargar Excel
             </button>
           </div>
-        </section>
-        <section className="card report-preview">
-          <div className="card-header">Vista previa</div>
+        </div>
+      </section>
+      {error && <div className="alert-danger">{error}</div>}
+      <section className="card report-preview">
+        <div className="card-header">
+          <span>Vista previa {report ? `· ${monthOptions.find((item) => item.value === month)?.label} ${year}` : ""}</span>
+          {report && <span className="report-institution">{report.institution.school_name} · {report.institution.ugel}</span>}
+        </div>
+        <div className="report-tabs">
+          <button className={previewSheet === "attendance" ? "active" : ""} onClick={() => setPreviewSheet("attendance")} type="button">Asistencia · Anexo 03</button>
+          <button className={previewSheet === "consolidated" ? "active" : ""} onClick={() => setPreviewSheet("consolidated")} type="button">Reporte consolidado · Anexo 04</button>
+        </div>
+        {report ? previewSheet === "attendance" ? (
           <DataTable
-            columns={["Reporte", "Fuente", "Formato"]}
-            rows={[
-              ["Anexo 03", "attendance_day + institution", "JSON"],
-              ["Anexo 04", "attendance_day + institution", "JSON"],
-            ]}
+            columns={["N°", "DNI", "Apellidos y nombres", "Asistencia", "Tardanzas", "Faltas", "Justificados"]}
+            rows={previewRows.map((row) => [
+              String(row.index), row.dni, row.full_name,
+              String(row.counts.present ?? 0), String(row.counts.late ?? 0),
+              String(row.counts.absent ?? 0), String(row.counts.justified ?? 0),
+            ])}
+            emptyText="No hay asistencia registrada para este mes"
           />
-        </section>
-      </div>
+        ) : (
+          <DataTable
+            columns={["N°", "DNI", "Apellidos y nombres", "Inasist. justificadas", "Licencias", "Faltas", "Tardanzas (min.)", "Permisos"]}
+            rows={previewRows.map((row) => [
+              String(row.index), row.dni, row.full_name,
+              String(row.counts.justified ?? 0), String(row.counts.leave ?? 0),
+              String(row.counts.absent ?? 0), String(row.lateMinutes), String(row.counts.permission ?? 0),
+            ])}
+            emptyText="No hay asistencia registrada para este mes"
+          />
+        ) : <div className="report-empty">Selecciona el período y presiona <strong>Previsualizar</strong>.</div>}
+      </section>
     </>
   );
 }
