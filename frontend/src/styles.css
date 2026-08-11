@@ -637,6 +637,14 @@ select {
   padding: 16px;
 }
 
+.card-footer-actions {
+  align-items: center;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 16px;
+}
+
 .chart-bars {
   align-items: flex-end;
   border-bottom: 1px solid var(--border);
@@ -743,9 +751,12 @@ tbody tr:last-child td {
 
 .attendance-month-wrap {
   max-height: 520px;
+  overflow: auto;
 }
 
 .attendance-month-table {
+  border-collapse: separate;
+  border-spacing: 0;
   min-width: 980px;
 }
 
@@ -761,7 +772,18 @@ tbody tr:last-child td {
   min-width: 220px;
   position: sticky;
   text-align: left;
-  z-index: 1;
+  z-index: 2;
+}
+
+.attendance-month-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.attendance-month-table thead .sticky-name {
+  background: #f8fafc;
+  z-index: 4;
 }
 
 .day-cell {

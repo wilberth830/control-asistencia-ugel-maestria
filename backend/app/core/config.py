@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # Redis is external (infra/redis)
     redis_url: str = "redis://127.0.0.1:6379/0"
 
-    access_token_expire_minutes: int = 60
+    access_token_expire_minutes: int = 720
     app_use_demo_store: bool = True
     app_allow_memory_session: bool = True
 

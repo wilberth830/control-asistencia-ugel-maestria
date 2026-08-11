@@ -127,6 +127,10 @@ def cancel(id: int, body: CancelBody, session: dict = Depends(require_token)):
             raise HTTPException(
                 status_code=409, detail="Import is not confirmed"
             ) from exc
+        if exc.code == "conflict_cancelled":
+            raise HTTPException(
+                status_code=409, detail="Import is already cancelled"
+            ) from exc
         raise
     audit_service.record(
         user_id=session["user_id"],

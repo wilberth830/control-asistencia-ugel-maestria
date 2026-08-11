@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services.attendance_service import attendance_service
 from app.services.biometric_import_service import biometric_import_service
 from app.services.staff_member_service import staff_member_service
 
@@ -31,6 +32,7 @@ BAT_CONTENT = rb"""
 def reset_demo_data() -> None:
     staff_member_service.reset_demo_data()
     biometric_import_service.reset()
+    attendance_service.reset()
 
 
 @pytest.fixture()
@@ -127,6 +129,63 @@ def test_confirm_auto_registers_new_rows(
     assert payload["rows"][1]["match"] == "matched"
 
 
+def test_confirmed_import_can_be_filtered_from_attendance(
+    auth_headers: dict[str, str],
+) -> None:
+    client = TestClient(app)
+    import_id = create_import(client, auth_headers).json()["id"]
+
+    confirm_response = client.post(
+        f"/api/v1/biometric-imports/{import_id}/confirmation",
+        headers=auth_headers,
+    )
+    assert confirm_response.status_code == 200
+
+    attendance_response = client.get(
+        "/api/v1/attendance-records",
+        params={"month": 7, "year": 2026, "import_id": import_id},
+        headers=auth_headers,
+    )
+
+    assert attendance_response.status_code == 200
+    payload = attendance_response.json()
+    assert len(payload) == 2
+    assert {row["attendance_date"] for row in payload} == {
+        "2026-07-01",
+        "2026-07-02",
+    }
+    assert all(row["biometric_import_id"] == import_id for row in payload)
+
+
+def test_confirmed_import_list_excludes_cancelled_imports(
+    auth_headers: dict[str, str],
+) -> None:
+    client = TestClient(app)
+    confirmed_id = create_import(client, auth_headers).json()["id"]
+    cancelled_id = create_import(client, auth_headers).json()["id"]
+
+    assert client.post(
+        f"/api/v1/biometric-imports/{confirmed_id}/confirmation",
+        headers=auth_headers,
+    ).status_code == 200
+    assert client.post(
+        f"/api/v1/biometric-imports/{cancelled_id}/cancellation",
+        json={"reason": "Archivo incorrecto"},
+        headers=auth_headers,
+    ).status_code == 200
+
+    response = client.get(
+        "/api/v1/biometric-imports",
+        params={"status": "confirmed"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    ids = {item["id"] for item in response.json()}
+    assert confirmed_id in ids
+    assert cancelled_id not in ids
+
+
 def test_register_new_then_confirm_and_cancel(
     auth_headers: dict[str, str],
 ) -> None:
@@ -162,7 +221,9 @@ def test_register_new_then_confirm_and_cancel(
     assert cancel_response.json()["status"] == "cancelled"
 
 
-def test_patch_and_cancel_state_conflicts(auth_headers: dict[str, str]) -> None:
+def test_cancel_draft_and_reject_already_cancelled(
+    auth_headers: dict[str, str],
+) -> None:
     client = TestClient(app)
     import_id = create_import(client, auth_headers).json()["id"]
 
@@ -172,5 +233,14 @@ def test_patch_and_cancel_state_conflicts(auth_headers: dict[str, str]) -> None:
         headers=auth_headers,
     )
 
-    assert cancel_draft_response.status_code == 409
-    assert cancel_draft_response.json() == {"detail": "Import is not confirmed"}
+    assert cancel_draft_response.status_code == 200
+    assert cancel_draft_response.json()["status"] == "cancelled"
+
+    cancel_again_response = client.post(
+        f"/api/v1/biometric-imports/{import_id}/cancellation",
+        json={"reason": "Otra vez"},
+        headers=auth_headers,
+    )
+
+    assert cancel_again_response.status_code == 409
+    assert cancel_again_response.json() == {"detail": "Import is already cancelled"}

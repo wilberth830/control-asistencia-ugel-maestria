@@ -677,6 +677,7 @@ function ImportPage() {
   const [importAction, setImportAction] = useState("");
   const [rowLoadingId, setRowLoadingId] = useState<number | null>(null);
   const [processingLabel, setProcessingLabel] = useState("");
+  const [wizardView, setWizardView] = useState<"file" | "review" | "confirm">("file");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -744,6 +745,7 @@ function ImportPage() {
         formData,
       );
       setCurrentImport(response.data);
+      setWizardView("review");
       syncRowDrafts(response.data.rows ?? []);
       setImports((current) => [
         response.data,
@@ -803,13 +805,16 @@ function ImportPage() {
         `/api/v1/biometric-imports/${currentImport.id}/cancellation`,
         { reason: "Archivo/mes incorrecto" },
       );
-      setCurrentImport(response.data);
+      setCurrentImport(null);
+      setSelectedFile(null);
+      setRowDrafts({});
+      setWizardView("file");
       setImports((current) =>
         current.map((item) => (item.id === response.data.id ? response.data : item)),
       );
       setMessage("Carga anulada");
     } catch {
-      setError("Solo puedes anular una carga confirmada.");
+      setError("No se pudo anular la carga.");
     } finally {
       setLoading(false);
       setImportAction("");
@@ -883,20 +888,15 @@ function ImportPage() {
     }));
   };
 
-  const unresolvedRows =
-    currentImport?.rows?.filter(
-      (row) => row.match === "new" && !row.resolved && !row.skipped,
-    ).length ?? 0;
+  const step = currentImport?.status === "confirmed"
+    ? 4
+    : wizardView === "confirm"
+      ? 3
+      : currentImport || loading
+        ? 2
+        : 1;
 
-  const step = !currentImport
-    ? loading
-      ? 2
-      : 1
-    : currentImport.status === "draft" && unresolvedRows > 0
-      ? 2
-      : currentImport.status === "draft"
-        ? 3
-        : 4;
+  const canContinueReview = currentImport?.status === "draft";
 
   return (
     <>
@@ -928,6 +928,9 @@ function ImportPage() {
           </div>
         </div>
       )}
+      {message && <div className="alert-success">{message}</div>}
+      {error && <div className="alert-danger">{error}</div>}
+      {step === 1 && (
       <section className="card">
         <div className="card-header">Nueva carga</div>
         <div className="card-body">
@@ -942,8 +945,6 @@ function ImportPage() {
               type="file"
             />
           </label>
-          {message && <div className="alert-success">{message}</div>}
-          {error && <div className="alert-danger">{error}</div>}
           <div className="actions">
             <button
               className="btn btn-primary"
@@ -958,28 +959,11 @@ function ImportPage() {
                   ? "Procesar otra vez"
                   : "Seleccionar archivo"}
             </button>
-            <button
-              className="btn btn-secondary"
-              disabled={!currentImport || loading || currentImport.status !== "draft"}
-              onClick={confirmImport}
-              type="button"
-            >
-              {importAction === "confirm" && <span className="btn-spinner" />}
-              {importAction === "confirm" ? "Confirmando" : "Confirmar carga"}
-            </button>
-            <button
-              className="btn btn-danger-outline"
-              disabled={!currentImport || loading}
-              onClick={cancelImport}
-              type="button"
-            >
-              {importAction === "cancel" && <span className="btn-spinner" />}
-              {importAction === "cancel" ? "Anulando" : "Anular carga"}
-            </button>
           </div>
         </div>
       </section>
-      {currentImport && (
+      )}
+      {currentImport && step === 2 && (
         <section className="card">
           <div className="card-header">
             Borrador #{currentImport.id} · {statusText(currentImport.status)}
@@ -1013,8 +997,72 @@ function ImportPage() {
             rows={currentImport.rows ?? []}
             onUpdateDraft={updateRowDraft}
           />
+          <div className="card-footer-actions">
+            <button
+              className="btn btn-primary"
+              disabled={!canContinueReview || loading || rowLoadingId !== null}
+              onClick={() => setWizardView("confirm")}
+              type="button"
+            >
+              Siguiente
+            </button>
+          </div>
         </section>
       )}
+      {currentImport && step === 3 && (
+        <section className="card">
+          <div className="card-header">Confirmación</div>
+          <div className="card-body import-summary">
+            <KpiCard
+              label="Archivo"
+              value={currentImport.file_name}
+              trend={`Borrador #${currentImport.id}`}
+            />
+            <KpiCard
+              label="Período"
+              value={`${currentImport.period_start ?? "-"} / ${
+                currentImport.period_end ?? "-"
+              }`}
+              trend={`${currentImport.total_rows} filas`}
+            />
+            <KpiCard
+              accent="green"
+              label="Encontradas"
+              value={currentImport.matched_rows}
+              trend="Listas para consolidar"
+            />
+          </div>
+          <div className="card-body actions">
+            <button
+              className="btn btn-secondary"
+              disabled={loading}
+              onClick={() => setWizardView("review")}
+              type="button"
+            >
+              Volver
+            </button>
+            <button
+              className="btn btn-primary"
+              disabled={loading || currentImport.status !== "draft"}
+              onClick={confirmImport}
+              type="button"
+            >
+              {importAction === "confirm" && <span className="btn-spinner" />}
+              {importAction === "confirm" ? "Confirmando" : "Finalizar carga"}
+            </button>
+            <button
+              className="btn btn-danger-outline"
+              disabled={loading}
+              onClick={cancelImport}
+              type="button"
+            >
+              {importAction === "cancel" && <span className="btn-spinner" />}
+              {importAction === "cancel" ? "Anulando" : "Anular carga"}
+            </button>
+          </div>
+        </section>
+      )}
+      {step === 1 && (
       <section className="card">
         <div className="card-header">Historial de cargas</div>
         <DataTable
@@ -1028,6 +1076,7 @@ function ImportPage() {
           emptyText="Sin cargas registradas"
         />
       </section>
+      )}
     </>
   );
 }
@@ -1235,8 +1284,15 @@ function AttendancePage() {
     ])
       .then(async ([importsResponse, staffResponse]) => {
         if (cancelled) return;
-        const imports = importsResponse.data;
-        const selectedPeriod = periodFromImports(imports, initialMonth, initialYear);
+        const imports = sortAttendanceImports(
+          importsResponse.data.filter((item) => item.status !== "cancelled"),
+        );
+        const selectedPeriod = periodFromImports(
+          imports,
+          initialMonth,
+          initialYear,
+          importId ? Number(importId) : undefined,
+        );
         const importsForMonth = imports.filter((item) =>
           importTouchesPeriod(item, selectedPeriod.month, selectedPeriod.year),
         );
@@ -1335,7 +1391,11 @@ function AttendancePage() {
         },
       );
       setAttendanceRows((rows) =>
-        rows.map((row) => (row.id === response.data.id ? response.data : row)),
+        rows.map((row) =>
+          sameAttendanceKey(row, response.data, selectedImportId)
+            ? response.data
+            : row,
+        ),
       );
       setSelectedDay(response.data);
       setLockedDayKey(dayKey);
@@ -1828,7 +1888,7 @@ function AttendanceMonthGrid({
       <table className="attendance-month-table">
         <thead>
           <tr>
-            <th>Personal</th>
+            <th className="sticky-name sticky-head">Personal</th>
             {days.map((day) => (
               <th key={day}>{String(day).padStart(2, "0")}</th>
             ))}
@@ -1920,10 +1980,23 @@ function statusText(status: string) {
 }
 
 function importTouchesPeriod(item: BiometricImport, month: number, year: number) {
-  const prefix = `${year}-${String(month).padStart(2, "0")}`;
-  return (
-    String(item.period_start ?? "").startsWith(prefix) ||
-    String(item.period_end ?? "").startsWith(prefix)
+  if (!item.period_start && !item.period_end) return false;
+  const monthStart = new Date(year, month - 1, 1).getTime();
+  const monthEnd = new Date(year, month, 0).getTime();
+  const importStart = parseDateValue(item.period_start ?? item.period_end);
+  const importEnd = parseDateValue(item.period_end ?? item.period_start);
+  if (importStart === null || importEnd === null) return false;
+  return importStart <= monthEnd && importEnd >= monthStart;
+}
+
+function sortAttendanceImports(imports: BiometricImport[]) {
+  const weight: Record<BiometricImport["status"], number> = {
+    confirmed: 0,
+    draft: 1,
+    cancelled: 2,
+  };
+  return [...imports].sort(
+    (left, right) => weight[left.status] - weight[right.status] || right.id - left.id,
   );
 }
 
@@ -1931,8 +2004,13 @@ function periodFromImports(
   imports: BiometricImport[],
   fallbackMonth: number,
   fallbackYear: number,
+  preferredImportId?: number,
 ) {
-  const firstImport = imports.find((item) => item.period_start || item.period_end);
+  const firstImport =
+    imports.find(
+      (item) =>
+        item.id === preferredImportId && (item.period_start || item.period_end),
+    ) ?? imports.find((item) => item.period_start || item.period_end);
   const period = firstImport?.period_start ?? firstImport?.period_end;
   if (!period) return { month: fallbackMonth, year: fallbackYear };
   return {
@@ -1944,8 +2022,17 @@ function periodFromImports(
 function yearsFromImports(imports: BiometricImport[], fallbackYear: number) {
   const years = new Set<number>();
   imports.forEach((item) => {
-    if (item.period_start) years.add(Number(item.period_start.slice(0, 4)));
-    if (item.period_end) years.add(Number(item.period_end.slice(0, 4)));
+    const startYear = item.period_start
+      ? Number(item.period_start.slice(0, 4))
+      : null;
+    const endYear = item.period_end ? Number(item.period_end.slice(0, 4)) : null;
+    if (startYear) years.add(startYear);
+    if (endYear) years.add(endYear);
+    if (startYear && endYear) {
+      for (let value = startYear; value <= endYear; value += 1) {
+        years.add(value);
+      }
+    }
   });
   return years.size ? [...years].sort((a, b) => b - a) : [fallbackYear];
 }
@@ -1956,12 +2043,13 @@ function monthsFromImports(
   fallbackMonth: number,
 ) {
   const months = new Set<number>();
-  imports.forEach((item) => {
-    if (item.period_start?.startsWith(`${selectedYear}-`)) {
-      months.add(Number(item.period_start.slice(5, 7)));
-    }
-    if (item.period_end?.startsWith(`${selectedYear}-`)) {
-      months.add(Number(item.period_end.slice(5, 7)));
+  monthOptions.forEach((option) => {
+    if (
+      imports.some((item) =>
+        importTouchesPeriod(item, option.value, selectedYear),
+      )
+    ) {
+      months.add(option.value);
     }
   });
   const values = months.size ? [...months].sort((a, b) => b - a) : [fallbackMonth];
@@ -1969,6 +2057,27 @@ function monthsFromImports(
     value,
     label: monthOptions.find((item) => item.value === value)?.label ?? String(value),
   }));
+}
+
+function parseDateValue(value?: string | null) {
+  if (!value) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day).getTime();
+}
+
+function sameAttendanceKey(
+  left: AttendanceDay,
+  right: AttendanceDay,
+  selectedImportId: number,
+) {
+  const leftImportId = (left.biometric_import_id ?? selectedImportId) || null;
+  const rightImportId = (right.biometric_import_id ?? selectedImportId) || null;
+  return (
+    left.staff_member_id === right.staff_member_id &&
+    left.attendance_date === right.attendance_date &&
+    leftImportId === rightImportId
+  );
 }
 
 function markTypeText(markType: string) {

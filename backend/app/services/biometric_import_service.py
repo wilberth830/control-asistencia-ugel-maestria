@@ -44,27 +44,22 @@ class BiometricImportService:
                 status=status, month=month, year=year
             )
             persisted_ids = {row["id"] for row in rows}
-            draft_rows = [
+            memory_rows = [
                 deepcopy(row)
                 for row in self._imports.values()
                 if row["id"] not in persisted_ids
-                if row["status"] == "draft" and (not status or row["status"] == status)
+                if self._matches_filters(row, status=status, month=month, year=year)
             ]
-            return draft_rows + rows
+            return memory_rows + rows
         except OracleRepositoryError:
             pass
 
         rows = list(self._imports.values())
-        if status:
-            rows = [row for row in rows if row["status"] == status]
-        if month and year:
-            prefix = f"{year:04d}-{month:02d}"
-            rows = [
-                row
-                for row in rows
-                if str(row.get("period_start") or "").startswith(prefix)
-                or str(row.get("period_end") or "").startswith(prefix)
-            ]
+        rows = [
+            row
+            for row in rows
+            if self._matches_filters(row, status=status, month=month, year=year)
+        ]
         return [deepcopy(row) for row in rows]
 
     def create_draft_from_csv(
@@ -155,16 +150,15 @@ class BiometricImportService:
                     "status": "valid",
                 }
             )
-            if row["mark_type"] == "entry":
-                attendance_date = str(row["marked_at"])[:10]
-                attendance_rows_by_key[(row["staff_member_id"], attendance_date)] = {
-                    "staff_member_id": row["staff_member_id"],
-                    "biometric_import_id": imp["id"],
-                    "attendance_date": attendance_date,
-                    "status": "present",
-                    "late_minutes": 0,
-                    "justification_id": None,
-                }
+            attendance_date = str(row["marked_at"])[:10]
+            attendance_rows_by_key[(row["staff_member_id"], attendance_date)] = {
+                "staff_member_id": row["staff_member_id"],
+                "biometric_import_id": imp["id"],
+                "attendance_date": attendance_date,
+                "status": "present",
+                "late_minutes": 0,
+                "justification_id": None,
+            }
         try:
             biometric_repository.insert_marks(mark_rows)
         except OracleRepositoryError:
@@ -188,15 +182,15 @@ class BiometricImportService:
                 persisted = None
             if not persisted:
                 raise
-            if persisted["status"] != "confirmed":
-                raise BiometricImportError("conflict_not_confirmed")
+            if persisted["status"] == "cancelled":
+                raise BiometricImportError("conflict_cancelled")
             persisted["status"] = "cancelled"
             updated = biometric_repository.update_import(import_id, persisted)
             updated = updated or persisted
             updated["cancel_reason"] = reason
             return updated
-        if imp["status"] != "confirmed":
-            raise BiometricImportError("conflict_not_confirmed")
+        if imp["status"] == "cancelled":
+            raise BiometricImportError("conflict_cancelled")
         imp["status"] = "cancelled"
         imp["cancel_reason"] = reason
         try:
@@ -244,6 +238,23 @@ class BiometricImportService:
             return f"{file_name}_{timestamp}"
         stem, extension = file_name.rsplit(".", 1)
         return f"{stem}_{timestamp}.{extension}"
+
+    def _matches_filters(
+        self,
+        row: dict[str, Any],
+        *,
+        status: str | None = None,
+        month: int | None = None,
+        year: int | None = None,
+    ) -> bool:
+        if status and row["status"] != status:
+            return False
+        if month and year:
+            prefix = f"{year:04d}-{month:02d}"
+            return str(row.get("period_start") or "").startswith(prefix) or str(
+                row.get("period_end") or ""
+            ).startswith(prefix)
+        return True
 
     def _parse_input_file(self, file_name: str, content: bytes) -> list[dict[str, Any]]:
         text = self._decode_content(content)

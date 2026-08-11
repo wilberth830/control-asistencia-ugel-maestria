@@ -147,7 +147,9 @@ class AttendanceService:
             raise AttendanceValidationError("invalid_month")
         try:
             if import_id:
-                return attendance_day_repository.list_by_import(import_id)
+                return attendance_day_repository.list_by_import(
+                    import_id, month=month, year=year
+                )
             return attendance_day_repository.list_month(
                 month=month, year=year, staff_member_id=staff_member_id
             )
