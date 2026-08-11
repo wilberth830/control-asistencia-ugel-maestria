@@ -463,7 +463,7 @@ select {
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: 0 20px 48px rgba(15, 23, 42, 0.24);
-  max-width: 620px;
+  max-width: 760px;
   overflow: hidden;
   width: 100%;
 }
@@ -518,6 +518,53 @@ select {
   gap: 8px;
   justify-content: flex-end;
   padding: 12px 20px;
+}
+
+.confirmation-backdrop {
+  z-index: 110;
+}
+
+.confirmation-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.24);
+  max-width: 390px;
+  padding: 24px;
+  text-align: center;
+  width: 100%;
+}
+
+.confirmation-icon {
+  align-items: center;
+  background: var(--warning-bg);
+  border-radius: 50%;
+  color: var(--warning);
+  display: flex;
+  font-size: 18px;
+  font-weight: 700;
+  height: 38px;
+  justify-content: center;
+  margin: 0 auto 12px;
+  width: 38px;
+}
+
+.confirmation-card h2 {
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+
+.confirmation-card p {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 20px;
+}
+
+.confirmation-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
 }
 
 .kpi-grid {
@@ -948,6 +995,25 @@ tbody tr:last-child td {
 .badge-warning {
   background: var(--warning-bg);
   color: var(--warning);
+}
+
+.badge-success {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.badge-muted {
+  background: #e2e8f0;
+  color: var(--text-secondary);
+}
+
+.status-button {
+  border: 0;
+  cursor: pointer;
+}
+
+.status-button:hover {
+  filter: brightness(0.96);
 }
 
 .attendance-layout {

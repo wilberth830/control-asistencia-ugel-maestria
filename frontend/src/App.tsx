@@ -379,14 +379,19 @@ function DashboardPage() {
 function StaffPage() {
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
+  const [confirmation, setConfirmation] = useState<{
+    action: "save" | "toggle-status";
+    staff: StaffMember;
+  } | null>(null);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "Y" | "N">("Y");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
   useEffect(() => {
     apiClient
-      .get<StaffMember[]>("/api/v1/staff-members", { params: { is_active: "Y" } })
+      .get<StaffMember[]>("/api/v1/staff-members")
       .then((response) => setStaffMembers(response.data))
       .catch(() => {
         setStaffMembers([]);
@@ -396,30 +401,50 @@ function StaffPage() {
 
   const visibleStaff = staffMembers.filter((item) => {
     const query = search.trim().toLowerCase();
-    return !query || [item.dni, item.last_names, item.first_names, item.job_title]
+    const matchesSearch = !query || [item.dni, item.last_names, item.first_names, item.job_title]
       .some((value) => value.toLowerCase().includes(query));
+    return matchesSearch && (statusFilter === "all" || item.is_active === statusFilter);
   });
 
   const saveStaff = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!editingStaff) return;
+    setConfirmation({ action: "save", staff: editingStaff });
+  };
+
+  const persistStaff = async (staff: StaffMember, successMessage: string) => {
     setSaving(true);
     setError("");
     try {
       const response = await apiClient.put<StaffMember>(
-        `/api/v1/staff-members/${editingStaff.id}`,
-        editingStaff,
+        `/api/v1/staff-members/${staff.id}`,
+        staff,
       );
       setStaffMembers((current) =>
         current.map((item) => item.id === response.data.id ? response.data : item),
       );
       setEditingStaff(null);
-      setMessage("Datos del personal actualizados correctamente.");
+      setMessage(successMessage);
     } catch {
       setError("No se pudieron guardar los cambios. Verifica los datos e inténtalo nuevamente.");
     } finally {
       setSaving(false);
     }
+  };
+
+  const confirmAction = async () => {
+    if (!confirmation) return;
+    const { action, staff } = confirmation;
+    setConfirmation(null);
+    if (action === "save") {
+      await persistStaff(staff, "Datos del personal actualizados correctamente.");
+      return;
+    }
+    const nextStatus = staff.is_active === "Y" ? "N" : "Y";
+    await persistStaff(
+      { ...staff, is_active: nextStatus },
+      nextStatus === "Y" ? "Personal activado correctamente." : "Personal desactivado correctamente.",
+    );
   };
 
   const updateEditingStaff = (field: keyof StaffMember, value: string) => {
@@ -441,11 +466,19 @@ function StaffPage() {
             value={search}
           />
         </label>
+        <label className="form-field">
+          <span>Estado</span>
+          <select onChange={(event) => setStatusFilter(event.target.value as "all" | "Y" | "N")} value={statusFilter}>
+            <option value="all">Todos</option>
+            <option value="Y">Activos</option>
+            <option value="N">Inactivos</option>
+          </select>
+        </label>
       </div>
       {message && <div className="alert-success">{message}</div>}
       {error && <div className="alert-danger">{error}</div>}
       <section className="card">
-        <div className="card-header">Personal activo</div>
+        <div className="card-header">Personal registrado</div>
         <div className="table-wrap">
           <table>
             <thead>
@@ -465,7 +498,16 @@ function StaffPage() {
                   <td>{item.last_names}, {item.first_names}</td>
                   <td>{item.job_title}</td>
                   <td>{item.employment_status ?? "-"}</td>
-                  <td><span className="badge badge-success">Activo</span></td>
+                  <td>
+                    <button
+                      className={`badge status-button ${item.is_active === "Y" ? "badge-success" : "badge-muted"}`}
+                      onClick={() => { setConfirmation({ action: "toggle-status", staff: item }); setError(""); setMessage(""); }}
+                      title={item.is_active === "Y" ? "Desactivar personal" : "Activar personal"}
+                      type="button"
+                    >
+                      {item.is_active === "Y" ? "Activo" : "Inactivo"}
+                    </button>
+                  </td>
                   <td className="staff-actions">
                     <button
                       className="btn btn-sm btn-secondary"
@@ -521,6 +563,27 @@ function StaffPage() {
                 <button className="btn btn-primary" disabled={saving} type="submit">{saving ? "Guardando..." : "Guardar cambios"}</button>
               </div>
             </form>
+          </section>
+        </div>
+      )}
+      {confirmation && (
+        <div className="modal-backdrop confirmation-backdrop" role="presentation">
+          <section aria-labelledby="confirmation-title" aria-modal="true" className="confirmation-card" role="dialog">
+            <div className="confirmation-icon">!</div>
+            <h2 id="confirmation-title">
+              {confirmation.action === "save" ? "¿Guardar cambios?" : confirmation.staff.is_active === "Y" ? "¿Desactivar personal?" : "¿Activar personal?"}
+            </h2>
+            <p>
+              {confirmation.action === "save"
+                ? `Se actualizarán los datos de ${confirmation.staff.last_names}, ${confirmation.staff.first_names}.`
+                : `${confirmation.staff.last_names}, ${confirmation.staff.first_names} quedará ${confirmation.staff.is_active === "Y" ? "inactivo" : "activo"}.`}
+            </p>
+            <div className="confirmation-actions">
+              <button className="btn btn-secondary" disabled={saving} onClick={() => setConfirmation(null)} type="button">Cancelar</button>
+              <button className="btn btn-primary" disabled={saving} onClick={confirmAction} type="button">
+                {saving ? "Guardando..." : "Sí, continuar"}
+              </button>
+            </div>
           </section>
         </div>
       )}
