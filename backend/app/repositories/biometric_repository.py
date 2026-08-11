@@ -22,8 +22,10 @@ class BiometricRepository:
         status: str | None = None,
         month: int | None = None,
         year: int | None = None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         period_filter = ""
+        limit_filter = ""
         params: dict[str, Any] = {"status": status}
         if month and year:
             start_date = date(year, month, 1)
@@ -35,7 +37,7 @@ class BiometricRepository:
               )
             """
             params.update({"start_date": start_date, "end_date": end_date})
-        sql = f"""
+        inner_sql = f"""
             SELECT id, file_name, file_path, uploaded_at, user_account_id, status,
                    period_start, period_end, total_rows, ok_rows, error_rows,
                    matched_rows, new_rows
@@ -44,6 +46,10 @@ class BiometricRepository:
             {period_filter}
             ORDER BY id DESC
         """
+        if limit:
+            limit_filter = "WHERE ROWNUM <= :limit"
+            params["limit"] = limit
+        sql = f"SELECT * FROM ({inner_sql}) {limit_filter}"
         try:
             with oracle_connection() as connection:
                 with connection.cursor() as cursor:

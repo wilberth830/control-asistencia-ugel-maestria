@@ -415,3 +415,22 @@ def test_cancelled_import_remains_visible_in_import_history(
     assert list_response.status_code == 200
     imports_by_id = {item["id"]: item for item in list_response.json()}
     assert imports_by_id[import_id]["status"] == "cancelled"
+
+
+def test_import_history_can_be_limited_to_latest_rows(
+    auth_headers: dict[str, str],
+) -> None:
+    client = TestClient(app)
+    created_ids = [
+        create_import(client, auth_headers).json()["id"]
+        for _ in range(12)
+    ]
+
+    list_response = client.get(
+        "/api/v1/biometric-imports?limit=10", headers=auth_headers
+    )
+
+    assert list_response.status_code == 200
+    payload = list_response.json()
+    assert len(payload) == 10
+    assert [item["id"] for item in payload] == list(reversed(created_ids[-10:]))

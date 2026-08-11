@@ -191,6 +191,9 @@ paths:
         - in: query
           name: year
           schema: { type: integer }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100 }
       responses:
         '200': { description: Import history }
     post:

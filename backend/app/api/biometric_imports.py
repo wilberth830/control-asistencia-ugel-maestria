@@ -1,6 +1,6 @@
 """TEC-D05 — wizard import routes."""
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from app.api.deps import require_token
@@ -18,9 +18,12 @@ def list_imports(
     status: str | None = None,
     month: int | None = None,
     year: int | None = None,
+    limit: int | None = Query(default=None, ge=1, le=100),
     session: dict = Depends(require_token),
 ):
-    return biometric_import_service.list(status=status, month=month, year=year)
+    return biometric_import_service.list(
+        status=status, month=month, year=year, limit=limit
+    )
 
 
 @router.post("", status_code=201)

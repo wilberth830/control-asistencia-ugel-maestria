@@ -783,7 +783,9 @@ function ImportPage() {
     let cancelled = false;
     setImportsLoading(true);
     apiClient
-      .get<BiometricImport[]>("/api/v1/biometric-imports")
+      .get<BiometricImport[]>("/api/v1/biometric-imports", {
+        params: { limit: 10 },
+      })
       .then((response) => {
         if (!cancelled) {
           setImports(response.data);
@@ -808,7 +810,9 @@ function ImportPage() {
   const loadImports = async () => {
     setImportsLoading(true);
     try {
-      const response = await apiClient.get<BiometricImport[]>("/api/v1/biometric-imports");
+      const response = await apiClient.get<BiometricImport[]>("/api/v1/biometric-imports", {
+        params: { limit: 10 },
+      });
       setImports(response.data);
       setImportsLoaded(true);
     } catch {
@@ -1080,7 +1084,15 @@ function ImportPage() {
       {currentImport && step === 2 && (
         <section className="card">
           <div className="card-header">
-            Borrador #{currentImport.id} · {statusText(currentImport.status)}
+            <span>Borrador #{currentImport.id} · {statusText(currentImport.status)}</span>
+            <button
+              className="btn btn-primary btn-sm"
+              disabled={!canContinueReview || loading || rowLoadingId !== null}
+              onClick={() => setWizardView("confirm")}
+              type="button"
+            >
+              Siguiente
+            </button>
           </div>
           <div className="card-body import-summary">
             <KpiCard
@@ -1111,16 +1123,6 @@ function ImportPage() {
             rows={currentImport.rows ?? []}
             onUpdateDraft={updateRowDraft}
           />
-          <div className="card-footer-actions">
-            <button
-              className="btn btn-primary"
-              disabled={!canContinueReview || loading || rowLoadingId !== null}
-              onClick={() => setWizardView("confirm")}
-              type="button"
-            >
-              Siguiente
-            </button>
-          </div>
         </section>
       )}
       {currentImport && step === 3 && (

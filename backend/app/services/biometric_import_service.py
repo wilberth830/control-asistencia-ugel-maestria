@@ -43,10 +43,11 @@ class BiometricImportService:
         status: str | None = None,
         month: int | None = None,
         year: int | None = None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         try:
             rows = biometric_repository.list_imports(
-                status=status, month=month, year=year
+                status=status, month=month, year=year, limit=limit
             )
             memory_by_id = {
                 row["id"]: deepcopy(row)
@@ -54,10 +55,11 @@ class BiometricImportService:
                 if self._matches_filters(row, status=status, month=month, year=year)
             }
             rows = [memory_by_id.pop(row["id"], row) for row in rows]
-            memory_rows = [
-                row for row in memory_by_id.values()
-            ]
-            return memory_rows + rows
+            memory_rows = sorted(
+                memory_by_id.values(), key=lambda row: row["id"], reverse=True
+            )
+            combined = memory_rows + rows
+            return combined[:limit] if limit else combined
         except OracleRepositoryError:
             pass
 
@@ -67,6 +69,9 @@ class BiometricImportService:
             for row in rows
             if self._matches_filters(row, status=status, month=month, year=year)
         ]
+        rows = sorted(rows, key=lambda row: row["id"], reverse=True)
+        if limit:
+            rows = rows[:limit]
         return [deepcopy(row) for row in rows]
 
     def create_draft_from_csv(
