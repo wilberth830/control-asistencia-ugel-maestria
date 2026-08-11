@@ -378,6 +378,7 @@ function DashboardPage() {
 
 function StaffPage() {
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
+  const [loading, setLoading] = useState(true);
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
   const [confirmation, setConfirmation] = useState<{
     action: "save" | "toggle-status";
@@ -396,7 +397,8 @@ function StaffPage() {
       .catch(() => {
         setStaffMembers([]);
         setError("No se pudo cargar el personal.");
-      });
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const visibleStaff = staffMembers.filter((item) => {
@@ -492,7 +494,9 @@ function StaffPage() {
               </tr>
             </thead>
             <tbody>
-              {visibleStaff.length ? visibleStaff.map((item) => (
+              {loading ? (
+                <tr><td colSpan={6} className="empty-cell">Cargando...</td></tr>
+              ) : visibleStaff.length ? visibleStaff.map((item) => (
                 <tr key={item.id}>
                   <td>{item.dni}</td>
                   <td>{item.last_names}, {item.first_names}</td>
