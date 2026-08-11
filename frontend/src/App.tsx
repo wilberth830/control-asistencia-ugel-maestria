@@ -47,6 +47,36 @@ type StaffMember = {
   is_active: "Y" | "N";
 };
 
+let staffMembersCache: StaffMember[] | null = null;
+let staffMembersRequest: Promise<StaffMember[]> | null = null;
+let staffMembersCacheVersion = 0;
+
+function loadStaffMembers(): Promise<StaffMember[]> {
+  if (staffMembersCache) return Promise.resolve(staffMembersCache);
+  if (staffMembersRequest) return staffMembersRequest;
+
+  const requestVersion = staffMembersCacheVersion;
+  const request: Promise<StaffMember[]> = apiClient
+    .get<StaffMember[]>("/api/v1/staff-members")
+    .then((response) => {
+      if (requestVersion === staffMembersCacheVersion) {
+        staffMembersCache = response.data;
+      }
+      return response.data;
+    })
+    .finally(() => {
+      if (staffMembersRequest === request) staffMembersRequest = null;
+    });
+  staffMembersRequest = request;
+  return request;
+}
+
+function clearStaffMembersCache() {
+  staffMembersCacheVersion += 1;
+  staffMembersCache = null;
+  staffMembersRequest = null;
+}
+
 type ImportRow = {
   row_id: number;
   order: number;
@@ -123,6 +153,7 @@ function App() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession));
       localStorage.setItem("token", nextSession.token);
     } else {
+      clearStaffMembersCache();
       localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem("token");
     }
@@ -229,6 +260,10 @@ function Shell({
   const title = navigationItems.find((item) =>
     location.pathname.startsWith(item.to),
   )?.label;
+
+  useEffect(() => {
+    void loadStaffMembers().catch(() => undefined);
+  }, []);
 
   const logout = async () => {
     setLoggingOut(true);
@@ -377,8 +412,10 @@ function DashboardPage() {
 }
 
 function StaffPage() {
-  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [staffMembers, setStaffMembers] = useState<StaffMember[]>(
+    () => staffMembersCache ?? [],
+  );
+  const [loading, setLoading] = useState(staffMembersCache === null);
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
   const [confirmation, setConfirmation] = useState<{
     action: "save" | "toggle-status";
@@ -391,14 +428,23 @@ function StaffPage() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    apiClient
-      .get<StaffMember[]>("/api/v1/staff-members")
-      .then((response) => setStaffMembers(response.data))
-      .catch(() => {
-        setStaffMembers([]);
-        setError("No se pudo cargar el personal.");
+    let cancelled = false;
+    loadStaffMembers()
+      .then((rows) => {
+        if (!cancelled) setStaffMembers(rows);
       })
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (!cancelled) {
+          setStaffMembers([]);
+          setError("No se pudo cargar el personal.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const visibleStaff = staffMembers.filter((item) => {
@@ -423,8 +469,16 @@ function StaffPage() {
         staff,
       );
       setStaffMembers((current) =>
-        current.map((item) => item.id === response.data.id ? response.data : item),
+        current.map((item) => {
+          const updated = item.id === response.data.id ? response.data : item;
+          return updated;
+        }),
       );
+      if (staffMembersCache) {
+        staffMembersCache = staffMembersCache.map((item) =>
+          item.id === response.data.id ? response.data : item,
+        );
+      }
       setEditingStaff(null);
       setMessage(successMessage);
     } catch {
