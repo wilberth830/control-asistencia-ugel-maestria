@@ -93,10 +93,17 @@ El instalador ejecuta en orden: schema, tablas, índices, seed y checks. Puede c
 
 ### 3. Backend
 
-```bash
 cd backend
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 8000
+```
+
+O bien desde la raíz del proyecto:
+
+```powershell
+cd scripts
+.
+start-backend.ps1
 ```
 
 ### 4. Frontend
@@ -118,3 +125,4 @@ Usuario demo:
 ```text
 director.demo / Demo12345
 ```
+####XD
