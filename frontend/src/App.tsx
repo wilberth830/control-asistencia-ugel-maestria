@@ -1784,6 +1784,14 @@ function ReportsPage() {
           <span>Vista previa {report ? `· ${monthOptions.find((item) => item.value === month)?.label} ${year}` : ""}</span>
           {report && <span className="report-institution">{report.institution.school_name} · {report.institution.ugel}</span>}
         </div>
+        {report && (
+          <div className="excel-preview-header">
+            <div className="excel-norm">NORMAS PARA EL REGISTRO Y CONTROL DE ASISTENCIA</div>
+            <div className="excel-annex">{previewSheet === "attendance" ? "ANEXO 03" : "ANEXO 04"}</div>
+            <div className="excel-title">{previewSheet === "attendance" ? "FORMATO 01: REPORTE DE ASISTENCIA DETALLADO" : "FORMATO 02: REPORTE CONSOLIDADO DE INASISTENCIAS, TARDANZAS Y PERMISOS"}</div>
+            <div className="excel-data"><strong>UGEL:</strong> {report.institution.ugel} <strong>· INSTITUCIÓN EDUCATIVA:</strong> {report.institution.school_name} <strong>· MES:</strong> {monthOptions.find((item) => item.value === month)?.label?.toUpperCase()} <strong>· AÑO:</strong> {year}</div>
+          </div>
+        )}
         <div className="report-tabs">
           <button className={previewSheet === "attendance" ? "active" : ""} onClick={() => setPreviewSheet("attendance")} type="button">Asistencia · Anexo 03</button>
           <button className={previewSheet === "consolidated" ? "active" : ""} onClick={() => setPreviewSheet("consolidated")} type="button">Reporte consolidado · Anexo 04</button>

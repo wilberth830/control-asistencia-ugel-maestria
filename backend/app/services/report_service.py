@@ -10,6 +10,7 @@ from typing import Any
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 from app.repositories.institution_repository import institution_repository
 from app.repositories.oracle import OracleRepositoryError
@@ -117,30 +118,34 @@ class ReportService:
         blue = PatternFill("solid", fgColor="00A1D6")
         thin = Side(style="thin", color="000000")
         sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_column)
-        sheet.cell(1, 1, "ANEXO " + ("03" if "DETALLADO" in title else "04"))
-        sheet.cell(1, 1).font = Font(bold=True, size=12)
+        sheet.cell(1, 1, "NORMAS PARA EL REGISTRO Y CONTROL DE ASISTENCIA Y SU APLICACIÓN EN LA PLANILLA ÚNICA DE PAGOS")
+        sheet.cell(1, 1).font = Font(bold=True, size=9)
         sheet.cell(1, 1).alignment = Alignment(horizontal="center")
         sheet.merge_cells(start_row=2, start_column=1, end_row=2, end_column=end_column)
-        title_cell = sheet.cell(2, 1, title)
+        sheet.cell(2, 1, "ANEXO " + ("03" if "DETALLADO" in title else "04"))
+        sheet.cell(2, 1).font = Font(bold=True, size=11)
+        sheet.cell(2, 1).alignment = Alignment(horizontal="center")
+        sheet.merge_cells(start_row=3, start_column=1, end_row=3, end_column=end_column)
+        title_cell = sheet.cell(3, 1, title)
         title_cell.fill = blue
         title_cell.font = Font(bold=True, size=14)
         title_cell.alignment = Alignment(horizontal="center")
         for row, label, value in [
-            (3, "UGEL:", institution.get("ugel", "")),
-            (4, "INSTITUCIÓN EDUCATIVA:", institution.get("school_name", "")),
-            (5, "NIVEL EDUCATIVO Y MODALIDAD:", institution.get("education_level", "")),
-            (6, "CÓDIGO MODULAR:", institution.get("modular_code", "")),
+            (4, "UGEL:", institution.get("ugel", "")),
+            (5, "INSTITUCIÓN EDUCATIVA:", institution.get("school_name", "")),
+            (6, "NIVEL EDUCATIVO Y MODALIDAD:", institution.get("education_level", "")),
+            (7, "CÓDIGO MODULAR:", institution.get("modular_code", "")),
         ]:
             sheet.cell(row, 1, label).font = Font(bold=True)
             sheet.merge_cells(start_row=row, start_column=2, end_row=row, end_column=min(7, end_column))
             sheet.cell(row, 2, value)
-        sheet.cell(3, max(8, end_column - 8), "MES:").font = Font(bold=True)
-        sheet.cell(3, max(8, end_column - 7), MONTH_NAMES[month - 1])
-        sheet.cell(3, max(8, end_column - 4), "AÑO:").font = Font(bold=True)
-        sheet.cell(3, max(8, end_column - 3), year)
-        sheet.cell(3, max(8, end_column - 1), "TURNO:").font = Font(bold=True)
-        sheet.cell(3, end_column, institution.get("shift_name", ""))
-        for row in sheet.iter_rows(min_row=1, max_row=6, min_col=1, max_col=end_column):
+        sheet.cell(4, max(8, end_column - 8), "MES:").font = Font(bold=True)
+        sheet.cell(4, max(8, end_column - 7), MONTH_NAMES[month - 1]).font = Font(bold=True, color="FF0000")
+        sheet.cell(4, max(8, end_column - 4), "AÑO:").font = Font(bold=True)
+        sheet.cell(4, max(8, end_column - 3), year).font = Font(bold=True, color="FF0000")
+        sheet.cell(4, max(8, end_column - 1), "TURNO:").font = Font(bold=True)
+        sheet.cell(4, end_column, institution.get("shift_name", "")).font = Font(bold=True, color="FF0000")
+        for row in sheet.iter_rows(min_row=1, max_row=7, min_col=1, max_col=end_column):
             for cell in row:
                 cell.border = Border(bottom=thin)
                 cell.alignment = Alignment(vertical="center")
@@ -158,26 +163,26 @@ class ReportService:
         thin = Side(style="thin", color="000000")
         headers = ["N°", "DNI", "APELLIDOS Y NOMBRES", "CARGO", "CONDICIÓN\nLABORAL", "JORNADA\nLABORAL"]
         for column, header in enumerate(headers, start=1):
-            sheet.merge_cells(start_row=8, start_column=column, end_row=9, end_column=column)
-            cell = sheet.cell(8, column, header)
+            sheet.merge_cells(start_row=9, start_column=column, end_row=10, end_column=column)
+            cell = sheet.cell(9, column, header)
             cell.fill = blue
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        sheet.merge_cells(start_row=8, start_column=first_day_column, end_row=8, end_column=end_column)
-        calendar_cell = sheet.cell(8, first_day_column, "DÍAS CALENDARIO")
+        sheet.merge_cells(start_row=9, start_column=first_day_column, end_row=9, end_column=end_column)
+        calendar_cell = sheet.cell(9, first_day_column, "DÍAS CALENDARIO")
         calendar_cell.fill = blue
         calendar_cell.font = Font(bold=True)
         calendar_cell.alignment = Alignment(horizontal="center")
         weekday_labels = ["lu.", "ma.", "mi.", "ju.", "vi.", "sá.", "do."]
         for day in range(1, days + 1):
             column = first_day_column + day - 1
-            cell = sheet.cell(9, column, day)
+            cell = sheet.cell(10, column, day)
             cell.fill = blue
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal="center")
-            sheet.cell(10, column, weekday_labels[date(year, month, day).weekday()]).alignment = Alignment(horizontal="center")
+            sheet.cell(11, column, weekday_labels[date(year, month, day).weekday()]).alignment = Alignment(horizontal="center")
         for index, staff in enumerate(staff_rows, start=1):
-            row = 10 + index
+            row = 11 + index
             values = [index, staff["dni"], self._full_name(staff), staff["job_title"], staff.get("employment_status") or "", ""]
             for column, value in enumerate(values, start=1):
                 sheet.cell(row, column, value)
@@ -186,7 +191,7 @@ class ReportService:
                 status = attendance.get("status") if attendance else ""
                 code = {"present": "A", "late": "T", "absent": "F", "justified": "J", "leave": "L", "permission": "P"}.get(status, "")
                 sheet.cell(row, first_day_column + day - 1, code).alignment = Alignment(horizontal="center")
-        self._format_table(sheet, 8, 10 + max(1, len(staff_rows)), end_column, [5, 12, 34, 16, 16, 16])
+        self._format_table(sheet, 9, 11 + max(1, len(staff_rows)), end_column, [5, 12, 34, 16, 16, 16])
 
     def _write_consolidated_sheet(
         self, sheet: Any, institution: dict[str, Any], staff_rows: list[dict[str, Any]], month: int, year: int
@@ -220,10 +225,21 @@ class ReportService:
                 cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
                 cell.alignment = cell.alignment.copy(vertical="center", wrap_text=True)
         for column, width in enumerate(widths, start=1):
-            sheet.column_dimensions[chr(64 + column)].width = width
+            sheet.column_dimensions[get_column_letter(column)].width = width
         sheet.freeze_panes = "G10"
         sheet.sheet_view.showGridLines = False
-        sheet.row_dimensions[8].height = 45
+        sheet.row_dimensions[start_row].height = 45
+        sheet.page_setup.orientation = "landscape"
+        sheet.page_setup.paperSize = sheet.PAPERSIZE_A4
+        sheet.page_setup.fitToWidth = 1
+        sheet.page_setup.fitToHeight = 0
+        sheet.sheet_properties.pageSetUpPr.fitToPage = True
+        sheet.page_margins.left = 0.15
+        sheet.page_margins.right = 0.15
+        sheet.page_margins.top = 0.3
+        sheet.page_margins.bottom = 0.3
+        sheet.print_title_rows = f"1:{start_row + 2}"
+        sheet.print_area = f"A1:{get_column_letter(end_column)}{end_row}"
 
     def _staff_member(self, staff_member_id: int) -> dict[str, Any]:
         try:
