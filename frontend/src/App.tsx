@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import {
   Navigate,
   NavLink,
@@ -9,11 +9,6 @@ import {
 } from "react-router-dom";
 
 import apiClient, { SESSION_EXPIRED_EVENT } from "./services/apiClient";
-import {
-  importTouchesPeriod,
-  monthsFromImports,
-  yearsFromImports,
-} from "./utils/periodUtils";
 
 type AccessMap = {
   modules: string[];
@@ -193,12 +188,12 @@ const REMEMBERED_USERNAME_KEY = "chiquistrukis.rememberedUsername";
 const REMEMBER_PREFERENCE_KEY = "chiquistrukis.rememberMe";
 
 const navigationItems = [
-  { to: "/dashboard", label: "Dashboard", icon: "D", module: "dashboard" },
-  { to: "/personal", label: "Personal", icon: "P", module: "personal" },
-  { to: "/carga", label: "Carga biométrica", icon: "C", module: "asistencia_biometrica" },
-  { to: "/asistencia", label: "Asistencia", icon: "A", module: "administracion_asistencia" },
-  { to: "/justificaciones", label: "Justificaciones", icon: "J", module: "administracion_asistencia" },
-  { to: "/reportes", label: "Reportes", icon: "R", module: "reportes_oficiales" },
+  { to: "/dashboard", label: "Dashboard", icon: "D" },
+  { to: "/personal", label: "Personal", icon: "P" },
+  { to: "/carga", label: "Carga biométrica", icon: "C" },
+  { to: "/asistencia", label: "Asistencia", icon: "A" },
+  { to: "/justificaciones", label: "Justificaciones", icon: "J" },
+  { to: "/reportes", label: "Reportes", icon: "R" },
 ];
 
 function readStoredSession(): Session | null {
@@ -388,10 +383,6 @@ function LoginPage({
   );
 }
 
-function modulePage(session: Session, module: string, page: ReactNode) {
-  return session.access.modules.includes(module) ? page : <Navigate to="/dashboard" replace />;
-}
-
 function Shell({
   session,
   onLogout,
@@ -431,14 +422,12 @@ function Shell({
           </span>
         </div>
         <nav className="sidebar-nav">
-          {navigationItems
-            .filter((item) => session.access.modules.includes(item.module))
-            .map((item) => (
+          {navigationItems.map((item) => (
             <NavLink className="nav-item" key={item.to} to={item.to}>
               <span className="nav-icon">{item.icon}</span>
               {item.label}
             </NavLink>
-            ))}
+          ))}
         </nav>
         <div className="sidebar-footer">CHIQUISTRUKIS · MVP</div>
       </aside>
@@ -468,11 +457,11 @@ function Shell({
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/personal" element={modulePage(session, "personal", <StaffPage />)} />
-            <Route path="/carga" element={modulePage(session, "asistencia_biometrica", <ImportPage />)} />
-            <Route path="/asistencia" element={modulePage(session, "administracion_asistencia", <AttendancePage />)} />
-            <Route path="/justificaciones" element={modulePage(session, "administracion_asistencia", <JustificationsPage />)} />
-            <Route path="/reportes" element={modulePage(session, "reportes_oficiales", <ReportsPage />)} />
+            <Route path="/personal" element={<StaffPage />} />
+            <Route path="/carga" element={<ImportPage />} />
+            <Route path="/asistencia" element={<AttendancePage />} />
+            <Route path="/justificaciones" element={<JustificationsPage />} />
+            <Route path="/reportes" element={<ReportsPage />} />
           </Routes>
         </main>
       </div>
@@ -481,20 +470,17 @@ function Shell({
 }
 
 function DashboardPage() {
-  const today = new Date();
-  const [month, setMonth] = useState(today.getMonth() + 1);
-  const [year, setYear] = useState(today.getFullYear());
   const [data, setData] = useState<DashboardIndicators | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     apiClient
       .get<DashboardIndicators>("/api/v1/dashboard/indicators", {
-        params: { month, year },
+        params: { month: 7, year: 2026 },
       })
       .then((response) => setData(response.data))
       .catch(() => setError("No se pudo cargar el dashboard"));
-  }, [month, year]);
+  }, []);
 
   const distribution = data?.mark_distribution ?? {};
   const maxValue = Math.max(1, ...Object.values(distribution));
@@ -505,12 +491,7 @@ function DashboardPage() {
         title="Resumen operativo"
         description="Indicadores del sistema y distribución de marcaciones del período"
       />
-      <Filters
-        month={month}
-        onMonthChange={setMonth}
-        onYearChange={setYear}
-        year={year}
-      />
+      <Filters />
       {error && <div className="alert-danger">{error}</div>}
       <div className="kpi-grid compact">
         <KpiCard
@@ -527,10 +508,7 @@ function DashboardPage() {
         />
       </div>
       <section className="card">
-        <div className="card-header">
-          Marcaciones del mes · {monthOptions.find((item) => item.value === month)?.label}{" "}
-          {year}
-        </div>
+        <div className="card-header">Marcaciones del mes · Julio 2026</div>
         <div className="card-body">
           <div className="chart-bars">
             {statusLabels.map((item) => (
@@ -621,20 +599,20 @@ function StaffPage() {
     setSaving(true);
     setError("");
     try {
-      const response = staff.id === 0
-        ? await apiClient.post<StaffMember>("/api/v1/staff-members", staff)
-        : await apiClient.put<StaffMember>(`/api/v1/staff-members/${staff.id}`, staff);
+      const response = await apiClient.put<StaffMember>(
+        `/api/v1/staff-members/${staff.id}`,
+        staff,
+      );
       setStaffMembers((current) =>
-        staff.id === 0
-          ? [response.data, ...current]
-          : current.map((item) => item.id === response.data.id ? response.data : item),
+        current.map((item) => {
+          const updated = item.id === response.data.id ? response.data : item;
+          return updated;
+        }),
       );
       if (staffMembersCache) {
-        staffMembersCache = staff.id === 0
-          ? [response.data, ...staffMembersCache]
-          : staffMembersCache.map((item) =>
-              item.id === response.data.id ? response.data : item,
-            );
+        staffMembersCache = staffMembersCache.map((item) =>
+          item.id === response.data.id ? response.data : item,
+        );
       }
       setEditingStaff(null);
       setMessage(successMessage);
@@ -650,12 +628,7 @@ function StaffPage() {
     const { action, staff } = confirmation;
     setConfirmation(null);
     if (action === "save") {
-      await persistStaff(
-        staff,
-        staff.id === 0
-          ? "Personal registrado correctamente."
-          : "Datos del personal actualizados correctamente.",
-      );
+      await persistStaff(staff, "Datos del personal actualizados correctamente.");
       return;
     }
     const nextStatus = staff.is_active === "Y" ? "N" : "Y";
@@ -692,23 +665,6 @@ function StaffPage() {
             <option value="N">Inactivos</option>
           </select>
         </label>
-        <div className="filter-actions">
-          <button
-            className="btn btn-primary"
-            onClick={() => setEditingStaff({
-              id: 0,
-              dni: "",
-              last_names: "",
-              first_names: "",
-              job_title: "Docente",
-              employment_status: "",
-              is_active: "Y",
-            })}
-            type="button"
-          >
-            Nuevo personal
-          </button>
-        </div>
       </div>
       {message && <div className="alert-success">{message}</div>}
       {error && <div className="alert-danger">{error}</div>}
@@ -767,8 +723,8 @@ function StaffPage() {
           <section aria-labelledby="edit-staff-title" aria-modal="true" className="modal-card" role="dialog">
             <div className="modal-header">
               <div>
-                <h2 id="edit-staff-title">{editingStaff.id === 0 ? "Nuevo personal" : "Editar personal"}</h2>
-                <p>{editingStaff.id === 0 ? "Registra un docente o auxiliar." : "Actualiza los datos del registro seleccionado."}</p>
+                <h2 id="edit-staff-title">Editar personal</h2>
+                <p>Actualiza los datos del registro seleccionado.</p>
               </div>
               <button aria-label="Cerrar" className="modal-close" onClick={() => setEditingStaff(null)} type="button">×</button>
             </div>
@@ -797,7 +753,7 @@ function StaffPage() {
               </div>
               <div className="modal-footer">
                 <button className="btn btn-secondary" disabled={saving} onClick={() => setEditingStaff(null)} type="button">Cancelar</button>
-                <button className="btn btn-primary" disabled={saving} type="submit">{saving ? "Guardando..." : editingStaff.id === 0 ? "Registrar personal" : "Guardar cambios"}</button>
+                <button className="btn btn-primary" disabled={saving} type="submit">{saving ? "Guardando..." : "Guardar cambios"}</button>
               </div>
             </form>
           </section>
@@ -808,15 +764,11 @@ function StaffPage() {
           <section aria-labelledby="confirmation-title" aria-modal="true" className="confirmation-card" role="dialog">
             <div className="confirmation-icon">!</div>
             <h2 id="confirmation-title">
-              {confirmation.action === "save"
-                ? confirmation.staff.id === 0 ? "¿Registrar personal?" : "¿Guardar cambios?"
-                : confirmation.staff.is_active === "Y" ? "¿Desactivar personal?" : "¿Activar personal?"}
+              {confirmation.action === "save" ? "¿Guardar cambios?" : confirmation.staff.is_active === "Y" ? "¿Desactivar personal?" : "¿Activar personal?"}
             </h2>
             <p>
               {confirmation.action === "save"
-                ? confirmation.staff.id === 0
-                  ? `Se registrará a ${confirmation.staff.last_names}, ${confirmation.staff.first_names}.`
-                  : `Se actualizarán los datos de ${confirmation.staff.last_names}, ${confirmation.staff.first_names}.`
+                ? `Se actualizarán los datos de ${confirmation.staff.last_names}, ${confirmation.staff.first_names}.`
                 : `${confirmation.staff.last_names}, ${confirmation.staff.first_names} quedará ${confirmation.staff.is_active === "Y" ? "inactivo" : "activo"}.`}
             </p>
             <div className="confirmation-actions">
@@ -872,6 +824,7 @@ function ImportPage() {
 
   useEffect(() => {
     let cancelled = false;
+    setImportsLoading(true);
     apiClient
       .get<BiometricImport[]>("/api/v1/biometric-imports", {
         params: { limit: 10 },
@@ -1416,22 +1369,6 @@ function ImportRowsTable({
                           {rowLoadingId === row.row_id && <span className="btn-spinner" />}
                           {rowLoadingId === row.row_id ? "Buscando" : "Rebuscar"}
                         </button>
-                        <button
-                          className="btn btn-sm btn-secondary"
-                          disabled={rowLoadingId === row.row_id}
-                          onClick={() => onPatchRow(row, "register_new")}
-                          type="button"
-                        >
-                          Registrar
-                        </button>
-                        <button
-                          className="btn btn-sm btn-ghost"
-                          disabled={rowLoadingId === row.row_id}
-                          onClick={() => onPatchRow(row, "skip")}
-                          type="button"
-                        >
-                          Omitir
-                        </button>
                       </div>
                     ) : (
                       "-"
@@ -1456,9 +1393,8 @@ function AttendancePage() {
   const query = new URLSearchParams(location.search);
   const importId = query.get("import_id");
   const fileName = query.get("file");
-  const today = new Date();
-  const initialMonth = Number(query.get("month") || today.getMonth() + 1);
-  const initialYear = Number(query.get("year") || today.getFullYear());
+  const initialMonth = Number(query.get("month") || 7);
+  const initialYear = Number(query.get("year") || 2026);
   const [month, setMonth] = useState(initialMonth);
   const [year, setYear] = useState(initialYear);
   const [loadedMonth, setLoadedMonth] = useState(initialMonth);
@@ -1484,6 +1420,16 @@ function AttendancePage() {
     nextYear = year,
     nextImportId = selectedImportId,
   ) => {
+    if (!nextImportId) {
+      setAttendanceRows([]);
+      setSelectedDay(null);
+      setSelectedStatus("present");
+      setLateMinutes(0);
+      setLockedDayKey("");
+      setError("");
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -1539,7 +1485,7 @@ function AttendancePage() {
         const nextImportId =
           importId && imports.some((item) => item.id === Number(importId))
             ? Number(importId)
-            : 0;
+            : importsForMonth[0]?.id ?? 0;
 
         setAllImports(imports);
         setMonth(selectedPeriod.month);
@@ -1547,6 +1493,15 @@ function AttendancePage() {
         setMonthImports(importsForMonth);
         setSelectedImportId(nextImportId);
         setStaffMembers(staffResponse.data);
+        if (!nextImportId) {
+          setAttendanceRows([]);
+          setSelectedDay(null);
+          setSelectedStatus("present");
+          setLateMinutes(0);
+          setLockedDayKey("");
+          setError("");
+          return;
+        }
         const attendanceResponse = await apiClient.get<AttendanceDay[]>(
           "/api/v1/attendance-records",
           {
@@ -1581,7 +1536,7 @@ function AttendancePage() {
     const importsForMonth = allImports.filter((item) =>
       importTouchesPeriod(item, nextMonth, nextYear),
     );
-    const nextImportId = selectedImportId === 0 || importsForMonth.some((item) => item.id === selectedImportId)
+    const nextImportId = importsForMonth.some((item) => item.id === selectedImportId)
       ? selectedImportId
       : importsForMonth[0]?.id ?? 0;
     setMonthImports(importsForMonth);
@@ -1596,11 +1551,20 @@ function AttendancePage() {
     const importsForMonth = allImports.filter((item) =>
       importTouchesPeriod(item, month, year),
     );
-    const nextImportId = selectedImportId === 0 || importsForMonth.some((item) => item.id === selectedImportId)
+    const nextImportId = importsForMonth.some((item) => item.id === selectedImportId)
       ? selectedImportId
       : importsForMonth[0]?.id ?? 0;
     setMonthImports(importsForMonth);
     setSelectedImportId(nextImportId);
+    if (!nextImportId) {
+      setAttendanceRows([]);
+      setSelectedDay(null);
+      setSelectedStatus("present");
+      setLateMinutes(0);
+      setLockedDayKey("");
+      setError("");
+      return;
+    }
     await loadAttendance(month, year, nextImportId);
   };
 
@@ -1845,20 +1809,13 @@ function JustificationsPage() {
   const localDate = new Date(today.getTime() - today.getTimezoneOffset() * 60_000)
     .toISOString()
     .slice(0, 10);
-  const initialMonth = today.getMonth() + 1;
-  const initialYear = today.getFullYear();
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
   const [justifications, setJustifications] = useState<Justification[]>([]);
-  const [absences, setAbsences] = useState<AttendanceDay[]>([]);
-  const [absenceMonth, setAbsenceMonth] = useState(initialMonth);
-  const [absenceYear, setAbsenceYear] = useState(initialYear);
-  const [loadedAbsenceMonth, setLoadedAbsenceMonth] = useState(initialMonth);
-  const [loadedAbsenceYear, setLoadedAbsenceYear] = useState(initialYear);
-  const [absencesLoading, setAbsencesLoading] = useState(true);
   const [staffMemberId, setStaffMemberId] = useState(0);
   const [startDate, setStartDate] = useState(localDate);
   const [endDate, setEndDate] = useState(localDate);
   const [normCode, setNormCode] = useState("LG");
+  const [withPay, setWithPay] = useState<"Y" | "N">("Y");
   const [reason, setReason] = useState("");
   const [supportFile, setSupportFile] = useState<File | null>(null);
   const [fileInputKey, setFileInputKey] = useState(0);
@@ -1876,77 +1833,33 @@ function JustificationsPage() {
     Promise.all([
       loadStaffMembers(),
       apiClient.get<Justification[]>("/api/v1/justifications"),
-      apiClient.get<AttendanceDay[]>("/api/v1/attendance-records", {
-        params: { month: initialMonth, year: initialYear },
-      }),
     ])
-      .then(([staff, response, attendanceResponse]) => {
+      .then(([staff, response]) => {
         if (!active) return;
+        const activeStaff = staff.filter((item) => item.is_active === "Y");
         setStaffMembers(staff);
+        setStaffMemberId((current) => current || activeStaff[0]?.id || 0);
         setJustifications(response.data);
-        setAbsences(
-          attendanceResponse.data.filter(
-            (item) => item.status === "absent" && item.justification_id === null,
-          ),
-        );
       })
       .catch(() => {
         if (active) setError("No se pudieron cargar las justificaciones.");
       })
       .finally(() => {
-        if (active) {
-          setLoading(false);
-          setAbsencesLoading(false);
-        }
+        if (active) setLoading(false);
       });
     return () => {
       active = false;
     };
-  }, [initialMonth, initialYear]);
+  }, []);
 
   const activeStaffMembers = staffMembers.filter((item) => item.is_active === "Y");
   const staffById = new Map(staffMembers.map((item) => [item.id, item]));
-  const selectedAbsences = absences.filter(
-    (item) =>
-      item.staff_member_id === staffMemberId &&
-      item.attendance_date >= startDate &&
-      item.attendance_date <= endDate,
-  );
-  const absenceYears = Array.from({ length: 7 }, (_, index) => initialYear + 1 - index);
-
-  const loadAbsences = async (month = absenceMonth, year = absenceYear) => {
-    setAbsencesLoading(true);
-    setError("");
-    try {
-      const response = await apiClient.get<AttendanceDay[]>(
-        "/api/v1/attendance-records",
-        { params: { month, year } },
-      );
-      setAbsences(
-        response.data.filter(
-          (item) => item.status === "absent" && item.justification_id === null,
-        ),
-      );
-      setLoadedAbsenceMonth(month);
-      setLoadedAbsenceYear(year);
-    } catch {
-      setAbsences([]);
-      setError("No se pudieron cargar las inasistencias pendientes.");
-    } finally {
-      setAbsencesLoading(false);
-    }
-  };
-
-  const selectAbsence = (item: AttendanceDay) => {
-    setStaffMemberId(item.staff_member_id);
-    setStartDate(item.attendance_date);
-    setEndDate(item.attendance_date);
-    setError("");
-    setMessage("");
-  };
 
   const changeNorm = (event: ChangeEvent<HTMLSelectElement>) => {
-    setNormCode(event.target.value);
+    const code = event.target.value;
+    setNormCode(code);
+    if (code === "LG") setWithPay("Y");
+    if (code === "LS" || code === "P") setWithPay("N");
   };
 
   const changeSupportFile = (event: ChangeEvent<HTMLInputElement>) => {
@@ -1966,7 +1879,7 @@ function JustificationsPage() {
     setError("");
     setMessage("");
     if (!staffMemberId) {
-      setError("Selecciona una inasistencia pendiente.");
+      setError("Selecciona al personal docente o auxiliar.");
       return;
     }
     if (endDate < startDate) {
@@ -1977,17 +1890,13 @@ function JustificationsPage() {
       setError("Ingresa el motivo o detalle de la justificación.");
       return;
     }
-    if (selectedAbsences.length === 0) {
-      setError("El periodo seleccionado no contiene inasistencias pendientes.");
-      return;
-    }
 
     const formData = new FormData();
     formData.append("staff_member_id", String(staffMemberId));
     formData.append("start_date", startDate);
     formData.append("end_date", endDate);
     formData.append("norm_code", normCode);
-    formData.append("with_pay", normCode === "LG" ? "Y" : "N");
+    formData.append("with_pay", withPay);
     formData.append("reason", reason.trim());
     if (supportFile) formData.append("support_file", supportFile);
 
@@ -2004,9 +1913,7 @@ function JustificationsPage() {
       setReason("");
       setSupportFile(null);
       setFileInputKey((current) => current + 1);
-      setStaffMemberId(0);
       setMessage("La justificación se registró correctamente.");
-      await loadAbsences(loadedAbsenceMonth, loadedAbsenceYear);
     } catch {
       setError(
         "No se pudo registrar la justificación. Revisa los datos y el sustento.",
@@ -2062,7 +1969,6 @@ function JustificationsPage() {
       setItemToCancel(null);
       setCancelReason("");
       setMessage("La justificación fue anulada correctamente.");
-      await loadAbsences(loadedAbsenceMonth, loadedAbsenceYear);
     } catch {
       setError("No se pudo anular la justificación.");
     } finally {
@@ -2077,108 +1983,6 @@ function JustificationsPage() {
         description="Gestión de licencias con/sin goce y adjunto de sustentos"
       />
       <section className="card">
-        <div className="card-header">
-          <span>Inasistencias pendientes por justificar</span>
-          <span className="subtle-inline">
-            {monthOptions.find((item) => item.value === loadedAbsenceMonth)?.label}{" "}
-            {loadedAbsenceYear} · {absences.length} registros
-          </span>
-        </div>
-        <div className="card-body">
-          <form
-            className="filters"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void loadAbsences();
-            }}
-          >
-            <label className="form-field">
-              <span>Mes</span>
-              <select
-                onChange={(event) => setAbsenceMonth(Number(event.target.value))}
-                value={absenceMonth}
-              >
-                {monthOptions.map((item) => (
-                  <option key={item.value} value={item.value}>{item.label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="form-field">
-              <span>Año</span>
-              <select
-                onChange={(event) => setAbsenceYear(Number(event.target.value))}
-                value={absenceYear}
-              >
-                {absenceYears.map((year) => (
-                  <option key={year} value={year}>{year}</option>
-                ))}
-              </select>
-            </label>
-            <button className="btn btn-primary" disabled={absencesLoading} type="submit">
-              {absencesLoading ? "Cargando" : "Buscar inasistencias"}
-            </button>
-          </form>
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>Personal</th>
-                <th>DNI</th>
-                <th>Origen</th>
-                <th>Estado</th>
-                <th>Acción</th>
-              </tr>
-            </thead>
-            <tbody>
-              {absencesLoading && (
-                <tr><td className="empty-cell" colSpan={6}>Cargando...</td></tr>
-              )}
-              {!absencesLoading && absences.length === 0 && (
-                <tr>
-                  <td className="empty-cell" colSpan={6}>
-                    No hay inasistencias pendientes en el periodo seleccionado.
-                  </td>
-                </tr>
-              )}
-              {!absencesLoading && absences.map((item) => {
-                const staff = staffById.get(item.staff_member_id);
-                const selected = selectedAbsences.some((absence) => absence.id === item.id);
-                return (
-                  <tr key={item.id}>
-                    <td>{formatJustificationPeriod(item.attendance_date, item.attendance_date)}</td>
-                    <td>
-                      <strong>
-                        {staff
-                          ? `${staff.last_names}, ${staff.first_names}`
-                          : `Personal #${item.staff_member_id}`}
-                      </strong>
-                    </td>
-                    <td>{staff?.dni ?? "—"}</td>
-                    <td>
-                      {item.biometric_import_id
-                        ? `Carga biométrica #${item.biometric_import_id}`
-                        : "Registro manual"}
-                    </td>
-                    <td><span className="badge badge-warning">Inasistencia</span></td>
-                    <td>
-                      <button
-                        className={`btn btn-sm ${selected ? "btn-primary" : "btn-secondary"}`}
-                        onClick={() => selectAbsence(item)}
-                        type="button"
-                      >
-                        {selected ? "Seleccionada" : "Justificar"}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </section>
-      <section className="card">
         <div className="card-header">Nueva Justificación</div>
         <form className="card-body justification-form" onSubmit={submitJustification}>
           {error && <div className="alert-danger justification-alert">{error}</div>}
@@ -2187,14 +1991,12 @@ function JustificationsPage() {
             <label className="form-field">
               <span>Personal Docente / Auxiliar</span>
               <select
-                disabled
+                disabled={loading || activeStaffMembers.length === 0}
+                onChange={(event) => setStaffMemberId(Number(event.target.value))}
                 required
                 value={staffMemberId}
               >
                 {loading && <option value={0}>Cargando...</option>}
-                {!loading && staffMemberId === 0 && activeStaffMembers.length > 0 && (
-                  <option value={0}>Selecciona una inasistencia pendiente</option>
-                )}
                 {!loading && activeStaffMembers.length === 0 && (
                   <option value={0}>No hay personal activo</option>
                 )}
@@ -2208,7 +2010,6 @@ function JustificationsPage() {
             <label className="form-field">
               <span>Fecha Inicio</span>
               <input
-                disabled={!staffMemberId}
                 max={endDate}
                 onChange={(event) => setStartDate(event.target.value)}
                 required
@@ -2219,7 +2020,6 @@ function JustificationsPage() {
             <label className="form-field">
               <span>Fecha Fin</span>
               <input
-                disabled={!staffMemberId}
                 min={startDate}
                 onChange={(event) => setEndDate(event.target.value)}
                 required
@@ -2235,6 +2035,16 @@ function JustificationsPage() {
                     {item.label}
                   </option>
                 ))}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Con Goce de Remuneración</span>
+              <select
+                onChange={(event) => setWithPay(event.target.value as "Y" | "N")}
+                value={withPay}
+              >
+                <option value="Y">Sí (Con Goce)</option>
+                <option value="N">No (Sin Goce)</option>
               </select>
             </label>
             <label className="form-field full-width">
@@ -2268,15 +2078,10 @@ function JustificationsPage() {
               <small className="file-caption">Formatos permitidos: PDF, JPG, PNG o WEBP.</small>
             </div>
           </div>
-          <p className="subtle-inline">
-            {selectedAbsences.length > 0
-              ? `${selectedAbsences.length} inasistencia(s) pendiente(s) incluida(s) en el periodo.`
-              : "Selecciona una inasistencia de la tabla para habilitar el registro."}
-          </p>
           <div className="justification-actions">
             <button
               className="btn btn-primary"
-              disabled={loading || submitting || selectedAbsences.length === 0}
+              disabled={loading || submitting || activeStaffMembers.length === 0}
               type="submit"
             >
               {submitting && <span className="btn-spinner" />}
@@ -2423,11 +2228,8 @@ function JustificationsPage() {
 }
 
 function ReportsPage() {
-  const today = new Date();
-  const [month, setMonth] = useState(today.getMonth() + 1);
-  const [year, setYear] = useState(today.getFullYear());
-  const [monthImports, setMonthImports] = useState<BiometricImport[]>([]);
-  const [selectedImportId, setSelectedImportId] = useState(0);
+  const [month, setMonth] = useState(7);
+  const [year, setYear] = useState(2026);
   const [annex, setAnnex] = useState<"03" | "04">("03");
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<{
@@ -2448,59 +2250,31 @@ function ReportsPage() {
     "Julio", "Agosto", "Setiembre", "Octubre", "Noviembre", "Diciembre",
   ];
 
-  useEffect(() => {
-    let cancelled = false;
-    apiClient
-      .get<BiometricImport[]>("/api/v1/biometric-imports", {
-        params: { status: "confirmed", month, year },
-      })
-      .then((response) => {
-        if (cancelled) return;
-        setMonthImports(response.data);
-        setSelectedImportId(0);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setError("No se pudieron cargar los archivos de asistencia.");
-        setMonthImports([]);
-        setSelectedImportId(0);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [month, year]);
-
   const loadPreview = async () => {
     setLoading(true);
     setError("");
     try {
-      const params = {
-        month,
-        year,
-        format: "json",
-        import_id: selectedImportId || undefined,
-      } as const;
+      const endpoint =
+        annex === "03"
+          ? "/api/v1/reports/annex-03"
+          : "/api/v1/reports/annex-04";
+      const response = await apiClient.get(endpoint, {
+        params: { month, year, format: "json" },
+      });
+      const data = response.data;
+      // Normalizar para preview
       if (annex === "03") {
-        const response = await apiClient.get<Annex03Report>(
-          "/api/v1/reports/annex-03",
-          { params },
-        );
-        const data = response.data;
         setPreview({
           institution: data.institution || {},
           period: data.period || { month, year },
-          rows: (data.rows || []).map((row) => ({
-            dni: row.dni || "",
-            full_name: row.full_name || "",
-            days: row.days || [],
+          rows: (data.rows || []).map((r: any) => ({
+            dni: r.dni || "",
+            full_name: r.full_name || "",
+            days: r.days || [],
           })),
         });
       } else {
-        const response = await apiClient.get<Annex04Report>(
-          "/api/v1/reports/annex-04",
-          { params },
-        );
-        const data = response.data;
+        // annex-04 es resumen global; armamos filas simples de totales
         setPreview({
           institution: data.institution || {},
           period: data.period || { month, year },
@@ -2514,7 +2288,7 @@ function ReportsPage() {
         });
       }
     } catch {
-      setError("No se pudo generar la vista previa del reporte.");
+      setError("No se pudo generar la vista previa");
       setPreview(null);
     } finally {
       setLoading(false);
@@ -2526,7 +2300,7 @@ function ReportsPage() {
     setError("");
     try {
       const response = await apiClient.get("/api/v1/reports/monthly-export", {
-        params: { month, year, import_id: selectedImportId || undefined },
+        params: { month, year },
         responseType: "blob",
       });
       const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -2549,7 +2323,7 @@ function ReportsPage() {
 
   const inst = preview?.institution || {};
   const daysInMonth = new Date(year, month, 0).getDate();
-  const dayCols = Array.from({ length: daysInMonth }, (_, index) => index + 1);
+  const dayCols = Array.from({ length: Math.min(daysInMonth, 15) }, (_, i) => i + 1);
 
   const statusLetter = (status: string) =>
     ({ present: "A", late: "T", absent: "F", justified: "J", leave: "L", permission: "P" }[
@@ -2589,28 +2363,9 @@ function ReportsPage() {
             <label className="form-field">
               <span>Año</span>
               <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
-                {Array.from({ length: 7 }, (_, index) => today.getFullYear() + 1 - index).map(
-                  (item) => <option key={item} value={item}>{item}</option>,
-                )}
-              </select>
-            </label>
-            <label className="form-field">
-              <span>Archivo</span>
-              <select
-                disabled={!monthImports.length}
-                onChange={(event) => setSelectedImportId(Number(event.target.value))}
-                value={selectedImportId}
-              >
-                <option value={0}>
-                  {monthImports.length
-                    ? "Todos los archivos del mes"
-                    : "Sin archivos para este mes"}
-                </option>
-                {monthImports.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    #{item.id} · {item.file_name}
-                  </option>
-                ))}
+                <option value={2026}>2026</option>
+                <option value={2025}>2025</option>
+                <option value={2024}>2024</option>
               </select>
             </label>
             <button
@@ -2784,17 +2539,9 @@ function PageHeader({
 }
 
 function Filters({
-  month,
-  year,
-  onMonthChange,
-  onYearChange,
   showSearch = false,
   vertical = false,
 }: {
-  month: number;
-  year: number;
-  onMonthChange: (month: number) => void;
-  onYearChange: (year: number) => void;
   showSearch?: boolean;
   vertical?: boolean;
 }) {
@@ -2808,20 +2555,25 @@ function Filters({
       )}
       <label className="form-field">
         <span>Mes</span>
-        <select value={month} onChange={(event) => onMonthChange(Number(event.target.value))}>
-          {monthOptions.map((item) => (
-            <option key={item.value} value={item.value}>{item.label}</option>
-          ))}
+        <select defaultValue="7">
+          <option value="7">Julio</option>
+          <option value="6">Junio</option>
+          <option value="5">Mayo</option>
         </select>
       </label>
       <label className="form-field">
         <span>Año</span>
-        <select value={year} onChange={(event) => onYearChange(Number(event.target.value))}>
-          {Array.from({ length: 7 }, (_, index) => new Date().getFullYear() + 1 - index).map(
-            (item) => <option key={item} value={item}>{item}</option>,
-          )}
+        <select defaultValue="2026">
+          <option value="2026">2026</option>
         </select>
       </label>
+      {!vertical && (
+        <div className="filter-actions">
+          <button className="btn btn-sm btn-primary" type="button">
+            Aplicar
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -3018,6 +2770,16 @@ function statusText(status: string) {
   return labels[status] ?? status;
 }
 
+function importTouchesPeriod(item: BiometricImport, month: number, year: number) {
+  if (!item.period_start && !item.period_end) return false;
+  const monthStart = new Date(year, month - 1, 1).getTime();
+  const monthEnd = new Date(year, month, 0).getTime();
+  const importStart = parseDateValue(item.period_start ?? item.period_end);
+  const importEnd = parseDateValue(item.period_end ?? item.period_start);
+  if (importStart === null || importEnd === null) return false;
+  return importStart <= monthEnd && importEnd >= monthStart;
+}
+
 function sortAttendanceImports(imports: BiometricImport[]) {
   const weight: Record<BiometricImport["status"], number> = {
     confirmed: 0,
@@ -3046,6 +2808,53 @@ function periodFromImports(
     month: Number(period.slice(5, 7)),
     year: Number(period.slice(0, 4)),
   };
+}
+
+function yearsFromImports(imports: BiometricImport[], fallbackYear: number) {
+  const years = new Set<number>();
+  imports.forEach((item) => {
+    const startYear = item.period_start
+      ? Number(item.period_start.slice(0, 4))
+      : null;
+    const endYear = item.period_end ? Number(item.period_end.slice(0, 4)) : null;
+    if (startYear) years.add(startYear);
+    if (endYear) years.add(endYear);
+    if (startYear && endYear) {
+      for (let value = startYear; value <= endYear; value += 1) {
+        years.add(value);
+      }
+    }
+  });
+  return years.size ? [...years].sort((a, b) => b - a) : [fallbackYear];
+}
+
+function monthsFromImports(
+  imports: BiometricImport[],
+  selectedYear: number,
+  fallbackMonth: number,
+) {
+  const months = new Set<number>();
+  monthOptions.forEach((option) => {
+    if (
+      imports.some((item) =>
+        importTouchesPeriod(item, option.value, selectedYear),
+      )
+    ) {
+      months.add(option.value);
+    }
+  });
+  const values = months.size ? [...months].sort((a, b) => b - a) : [fallbackMonth];
+  return values.map((value) => ({
+    value,
+    label: monthOptions.find((item) => item.value === value)?.label ?? String(value),
+  }));
+}
+
+function parseDateValue(value?: string | null) {
+  if (!value) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day).getTime();
 }
 
 function sameAttendanceKey(

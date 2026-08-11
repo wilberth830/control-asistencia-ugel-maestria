@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import csv
-import re
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import datetime
 from io import StringIO
+import re
 from typing import Any
 
-from app.core.runtime import use_memory_fallback
-from app.repositories.ai_usage_repository import ai_usage_repository
 from app.repositories.biometric_repository import biometric_repository
+from app.repositories.ai_usage_repository import ai_usage_repository
 from app.repositories.oracle import OracleRepositoryError
 from app.services.ai_biometric_normalizer_service import (
     AINormalizationResult,
@@ -56,9 +55,13 @@ class BiometricImportService:
                 if self._matches_filters(row, status=status, month=month, year=year)
             }
             rows = [memory_by_id.pop(row["id"], row) for row in rows]
-            return rows[:limit] if limit else rows
-        except OracleRepositoryError as exc:
-            use_memory_fallback("biometric import list", exc)
+            memory_rows = sorted(
+                memory_by_id.values(), key=lambda row: row["id"], reverse=True
+            )
+            combined = memory_rows + rows
+            return combined[:limit] if limit else combined
+        except OracleRepositoryError:
+            pass
 
         rows = list(self._imports.values())
         rows = [
@@ -81,18 +84,18 @@ class BiometricImportService:
                 final_file_name, ai_usage.estimated_cost_usd
             )
         final_file_name = self._fit_file_name(final_file_name)
-        return self._create_draft(final_file_name, rows, user_account_id, ai_usage)
+        return self._create_draft(
+            final_file_name, rows, user_account_id, ai_usage
+        )
 
     def get(self, import_id: int) -> dict[str, Any] | None:
+        row = self._imports.get(import_id)
+        if row:
+            return deepcopy(row)
         try:
-            persisted = biometric_repository.get_import(import_id)
-            if persisted is None:
-                return None
-            return deepcopy(self._imports.get(import_id, persisted))
-        except OracleRepositoryError as exc:
-            use_memory_fallback("biometric import lookup", exc)
-            row = self._imports.get(import_id)
-            return deepcopy(row) if row else None
+            return biometric_repository.get_import(import_id)
+        except OracleRepositoryError:
+            return None
 
     def update_row(
         self,
@@ -133,7 +136,6 @@ class BiometricImportService:
 
     def confirm(self, import_id: int) -> dict[str, Any]:
         from app.services.attendance_service import attendance_service
-        from app.services.inconsistency_service import inconsistency_service
 
         imp = self._find(import_id)
         if imp["status"] != "draft":
@@ -159,7 +161,6 @@ class BiometricImportService:
         imp["error_rows"] = sum(1 for row in imp["rows"] if row.get("skipped"))
         mark_rows = []
         attendance_rows_by_key: dict[tuple[int, str], dict[str, Any]] = {}
-        attendance_dates: set[str] = set()
         for row in imp["rows"]:
             if row.get("skipped") or not row.get("staff_member_id"):
                 continue
@@ -174,7 +175,6 @@ class BiometricImportService:
                 }
             )
             attendance_date = str(row["marked_at"])[:10]
-            attendance_dates.add(attendance_date)
             attendance_rows_by_key[(row["staff_member_id"], attendance_date)] = {
                 "staff_member_id": row["staff_member_id"],
                 "biometric_import_id": imp["id"],
@@ -183,67 +183,46 @@ class BiometricImportService:
                 "late_minutes": 0,
                 "justification_id": None,
             }
-        for staff_member in staff_member_service.list(is_active="Y"):
-            for attendance_date in attendance_dates:
-                key = (staff_member["id"], attendance_date)
-                if key not in attendance_rows_by_key:
-                    attendance_rows_by_key[key] = {
-                        "staff_member_id": staff_member["id"],
-                        "biometric_import_id": imp["id"],
-                        "attendance_date": attendance_date,
-                        "status": "absent",
-                        "late_minutes": 0,
-                        "justification_id": None,
-                    }
         try:
             biometric_repository.insert_marks(mark_rows)
-        except OracleRepositoryError as exc:
-            use_memory_fallback("biometric mark insert", exc)
+        except OracleRepositoryError:
+            pass
         attendance_service.bulk_upsert_days(list(attendance_rows_by_key.values()))
         try:
             persisted = biometric_repository.update_import(imp["id"], imp)
             if persisted:
                 imp.update(persisted)
-        except OracleRepositoryError as exc:
-            use_memory_fallback("biometric import confirmation", exc)
-        try:
-            inconsistency_service.analyze_and_persist(imp["id"])
-        except OracleRepositoryError as exc:
-            use_memory_fallback("inconsistency persistence", exc)
+        except OracleRepositoryError:
+            pass
         return deepcopy(imp)
 
     def cancel(self, import_id: int, reason: str) -> dict[str, Any]:
-        from app.services.attendance_service import attendance_service
-
         try:
             imp = self._find(import_id)
         except BiometricImportError:
             try:
                 persisted = biometric_repository.get_import(import_id)
-            except OracleRepositoryError as exc:
-                use_memory_fallback("biometric import cancellation lookup", exc)
+            except OracleRepositoryError:
                 persisted = None
             if not persisted:
                 raise
             if persisted["status"] == "cancelled":
                 raise BiometricImportError("conflict_cancelled")
-            updated = biometric_repository.cancel_import(import_id)
+            persisted["status"] = "cancelled"
+            updated = biometric_repository.update_import(import_id, persisted)
             updated = updated or persisted
-            updated["status"] = "cancelled"
             updated["cancel_reason"] = reason
-            attendance_service.cancel_import(import_id)
             return updated
         if imp["status"] == "cancelled":
             raise BiometricImportError("conflict_cancelled")
         imp["status"] = "cancelled"
         imp["cancel_reason"] = reason
         try:
-            persisted = biometric_repository.cancel_import(imp["id"])
+            persisted = biometric_repository.update_import(imp["id"], imp)
             if persisted:
                 imp.update(persisted)
-        except OracleRepositoryError as exc:
-            use_memory_fallback("biometric import cancellation", exc)
-        attendance_service.cancel_import(import_id)
+        except OracleRepositoryError:
+            pass
         return deepcopy(imp)
 
     def _create_draft(
@@ -276,8 +255,7 @@ class BiometricImportService:
         try:
             persisted = biometric_repository.create_import(imp)
             imp.update(persisted)
-        except OracleRepositoryError as exc:
-            use_memory_fallback("biometric import draft create", exc)
+        except OracleRepositoryError:
             self._seq += 1
             imp["id"] = self._seq
         if ai_usage and ai_usage.source == "openai":
@@ -286,7 +264,7 @@ class BiometricImportService:
         return deepcopy(imp)
 
     def _timestamped_file_name(self, file_name: str) -> str:
-        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         if "." not in file_name:
             return f"{file_name}_{timestamp}"
         stem, extension = file_name.rsplit(".", 1)
@@ -327,8 +305,8 @@ class BiometricImportService:
                     "estimated_cost_usd": str(ai_usage.estimated_cost_usd),
                 }
             )
-        except OracleRepositoryError as exc:
-            use_memory_fallback("AI usage audit", exc)
+        except OracleRepositoryError:
+            pass
 
     def _matches_filters(
         self,
@@ -375,9 +353,7 @@ class BiometricImportService:
 
     def _extract_csv_from_batch(self, text: str) -> str:
         rows: list[str] = []
-        pattern = re.compile(
-            r'^\s*(?:>|>>)\s*"?[^"]+"?\s+echo\s+(.+?)\s*$', re.IGNORECASE
-        )
+        pattern = re.compile(r'^\s*(?:>|>>)\s*"?[^"]+"?\s+echo\s+(.+?)\s*$', re.I)
         for line in text.splitlines():
             match = pattern.match(line)
             if match:

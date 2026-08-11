@@ -147,18 +147,50 @@ class AttendanceDayRepository:
             start_date = date(year, month, 1)
             end_date = date(year + int(month == 12), 1 if month == 12 else month + 1, 1)
             period_filter = """
-              AND attendance_date >= :start_date
-              AND attendance_date < :end_date
+              AND bm.marked_at >= :start_date
+              AND bm.marked_at < :end_date
             """
             params.update({"start_date": start_date, "end_date": end_date})
-        sql = f"""
-            SELECT id, staff_member_id, biometric_import_id, attendance_date,
-                   status, late_minutes, justification_id
-            FROM attendance_day
-            WHERE biometric_import_id = :import_id
-            {period_filter}
+        sql = """
+            WITH mark_days AS (
+                SELECT
+                    bm.staff_member_id,
+                    bm.biometric_import_id,
+                    TRUNC(bm.marked_at) AS attendance_date,
+                    MIN(COALESCE(scoped.id, generic.id)) AS attendance_id,
+                    MAX(COALESCE(scoped.status, generic.status, 'present'))
+                        KEEP (DENSE_RANK LAST ORDER BY bm.marked_at) AS status,
+                    MAX(COALESCE(scoped.late_minutes, generic.late_minutes, 0))
+                        AS late_minutes,
+                    MAX(COALESCE(scoped.justification_id, generic.justification_id))
+                        AS justification_id
+                FROM biometric_mark bm
+                LEFT JOIN attendance_day scoped
+                  ON scoped.staff_member_id = bm.staff_member_id
+                 AND scoped.attendance_date = TRUNC(bm.marked_at)
+                 AND scoped.biometric_import_id = bm.biometric_import_id
+                LEFT JOIN attendance_day generic
+                  ON generic.staff_member_id = bm.staff_member_id
+                 AND generic.attendance_date = TRUNC(bm.marked_at)
+                 AND generic.biometric_import_id IS NULL
+                WHERE bm.biometric_import_id = :import_id
+                {period_filter}
+                GROUP BY bm.staff_member_id, bm.biometric_import_id, TRUNC(bm.marked_at)
+            )
+            SELECT
+                COALESCE(
+                    attendance_id,
+                    -ROW_NUMBER() OVER (ORDER BY attendance_date, staff_member_id)
+                ) AS id,
+                staff_member_id,
+                biometric_import_id,
+                attendance_date,
+                status,
+                late_minutes,
+                justification_id
+            FROM mark_days
             ORDER BY attendance_date, staff_member_id
-        """
+        """.format(period_filter=period_filter)
         try:
             with oracle_connection() as connection:
                 with connection.cursor() as cursor:
@@ -210,19 +242,7 @@ class AttendanceDayRepository:
                     cursor.execute(
                         """
                         UPDATE attendance_day
-                           SET status = CASE
-                                   WHEN EXISTS (
-                                       SELECT 1
-                                       FROM biometric_mark bm
-                                       WHERE bm.staff_member_id = attendance_day.staff_member_id
-                                         AND TRUNC(bm.marked_at) = attendance_day.attendance_date
-                                         AND (
-                                             attendance_day.biometric_import_id IS NULL
-                                             OR bm.biometric_import_id = attendance_day.biometric_import_id
-                                         )
-                                   ) THEN 'present'
-                                   ELSE 'absent'
-                               END,
+                           SET status = 'absent',
                                late_minutes = 0,
                                justification_id = NULL
                          WHERE justification_id = :justification_id
@@ -234,44 +254,6 @@ class AttendanceDayRepository:
         except oracledb.Error as exc:
             raise OracleRepositoryError(
                 "Attendance justification clear failed"
-            ) from exc
-
-    def apply_justification(
-        self,
-        *,
-        justification_id: int,
-        staff_member_id: int,
-        start_date: date,
-        end_date: date,
-        status: str,
-    ) -> int:
-        try:
-            with oracle_connection() as connection:
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        """
-                        UPDATE attendance_day
-                           SET status = :status,
-                               late_minutes = 0,
-                               justification_id = :justification_id
-                         WHERE staff_member_id = :staff_member_id
-                           AND attendance_date >= :start_date
-                           AND attendance_date <= :end_date
-                           AND status = 'absent'
-                           AND justification_id IS NULL
-                        """,
-                        status=status,
-                        justification_id=justification_id,
-                        staff_member_id=staff_member_id,
-                        start_date=start_date,
-                        end_date=end_date,
-                    )
-                    changed_count = cursor.rowcount
-                connection.commit()
-                return changed_count
-        except oracledb.Error as exc:
-            raise OracleRepositoryError(
-                "Attendance justification apply failed"
             ) from exc
 
     def _row(self, row: Any) -> dict[str, Any]:
