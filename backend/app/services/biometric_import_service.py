@@ -6,8 +6,11 @@ import csv
 from copy import deepcopy
 from datetime import datetime
 from io import StringIO
+import re
 from typing import Any
 
+from app.repositories.biometric_repository import biometric_repository
+from app.repositories.oracle import OracleRepositoryError
 from app.services.staff_member_service import (
     StaffMemberConflictError,
     staff_member_service,
@@ -36,6 +39,21 @@ class BiometricImportService:
         month: int | None = None,
         year: int | None = None,
     ) -> list[dict[str, Any]]:
+        try:
+            rows = biometric_repository.list_imports(
+                status=status, month=month, year=year
+            )
+            persisted_ids = {row["id"] for row in rows}
+            draft_rows = [
+                deepcopy(row)
+                for row in self._imports.values()
+                if row["id"] not in persisted_ids
+                if row["status"] == "draft" and (not status or row["status"] == status)
+            ]
+            return draft_rows + rows
+        except OracleRepositoryError:
+            pass
+
         rows = list(self._imports.values())
         if status:
             rows = [row for row in rows if row["status"] == status]
@@ -49,13 +67,20 @@ class BiometricImportService:
             ]
         return [deepcopy(row) for row in rows]
 
-    def create_draft_from_csv(self, file_name: str, content: bytes) -> dict[str, Any]:
-        rows = self._parse_csv(content)
-        return self._create_draft(file_name, rows)
+    def create_draft_from_csv(
+        self, file_name: str, content: bytes, user_account_id: int | None = None
+    ) -> dict[str, Any]:
+        rows = self._parse_input_file(file_name, content)
+        return self._create_draft(file_name, rows, user_account_id)
 
     def get(self, import_id: int) -> dict[str, Any] | None:
         row = self._imports.get(import_id)
-        return deepcopy(row) if row else None
+        if row:
+            return deepcopy(row)
+        try:
+            return biometric_repository.get_import(import_id)
+        except OracleRepositoryError:
+            return None
 
     def update_row(
         self,
@@ -95,6 +120,8 @@ class BiometricImportService:
         return deepcopy(row)
 
     def confirm(self, import_id: int) -> dict[str, Any]:
+        from app.services.attendance_service import attendance_service
+
         imp = self._find(import_id)
         if imp["status"] != "draft":
             raise BiometricImportError("conflict_not_draft")
@@ -108,23 +135,72 @@ class BiometricImportService:
         imp["status"] = "confirmed"
         imp["ok_rows"] = sum(1 for row in imp["rows"] if not row.get("skipped"))
         imp["error_rows"] = sum(1 for row in imp["rows"] if row.get("skipped"))
+        try:
+            for row in imp["rows"]:
+                if row.get("skipped") or not row.get("staff_member_id"):
+                    continue
+                biometric_repository.insert_mark(
+                    staff_member_id=row["staff_member_id"],
+                    biometric_import_id=imp["id"],
+                    marked_at=datetime.fromisoformat(str(row["marked_at"])),
+                    mark_type=row["mark_type"],
+                    status="valid",
+                )
+                if row["mark_type"] == "entry":
+                    attendance_service.upsert_day(
+                        staff_member_id=row["staff_member_id"],
+                        attendance_date=str(row["marked_at"])[:10],
+                        status="present",
+                        late_minutes=0,
+                        justification_id=None,
+                    )
+            persisted = biometric_repository.update_import(imp["id"], imp)
+            if persisted:
+                imp.update(persisted)
+        except OracleRepositoryError:
+            pass
         return deepcopy(imp)
 
     def cancel(self, import_id: int, reason: str) -> dict[str, Any]:
-        imp = self._find(import_id)
+        try:
+            imp = self._find(import_id)
+        except BiometricImportError:
+            try:
+                persisted = biometric_repository.get_import(import_id)
+            except OracleRepositoryError:
+                persisted = None
+            if not persisted:
+                raise
+            if persisted["status"] != "confirmed":
+                raise BiometricImportError("conflict_not_confirmed")
+            persisted["status"] = "cancelled"
+            updated = biometric_repository.update_import(import_id, persisted)
+            updated = updated or persisted
+            updated["cancel_reason"] = reason
+            return updated
         if imp["status"] != "confirmed":
             raise BiometricImportError("conflict_not_confirmed")
         imp["status"] = "cancelled"
         imp["cancel_reason"] = reason
+        try:
+            persisted = biometric_repository.update_import(imp["id"], imp)
+            if persisted:
+                imp.update(persisted)
+        except OracleRepositoryError:
+            pass
         return deepcopy(imp)
 
     def _create_draft(
-        self, file_name: str, rows: list[dict[str, Any]]
+        self,
+        file_name: str,
+        rows: list[dict[str, Any]],
+        user_account_id: int | None = None,
     ) -> dict[str, Any]:
-        self._seq += 1
         imp = {
-            "id": self._seq,
+            "id": 0,
             "file_name": file_name,
+            "file_path": None,
+            "user_account_id": user_account_id,
             "status": "draft",
             "period_start": self._period_value(rows, minimum=True),
             "period_end": self._period_value(rows, minimum=False),
@@ -136,29 +212,63 @@ class BiometricImportService:
             "rows": rows,
         }
         self._refresh_counters(imp)
-        self._imports[self._seq] = imp
+        try:
+            persisted = biometric_repository.create_import(imp)
+            imp.update(persisted)
+        except OracleRepositoryError:
+            self._seq += 1
+            imp["id"] = self._seq
+        self._imports[imp["id"]] = imp
         return deepcopy(imp)
 
-    def _parse_csv(self, content: bytes) -> list[dict[str, Any]]:
-        text = content.decode("utf-8-sig")
+    def _parse_input_file(self, file_name: str, content: bytes) -> list[dict[str, Any]]:
+        text = self._decode_content(content)
+        if file_name.lower().endswith((".bat", ".cmd")):
+            text = self._extract_csv_from_batch(text)
+        return self._parse_csv_text(text)
+
+    def _decode_content(self, content: bytes) -> str:
+        for encoding in ("utf-8-sig", "cp1252", "latin-1"):
+            try:
+                return content.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        raise BiometricImportError("invalid_file")
+
+    def _extract_csv_from_batch(self, text: str) -> str:
+        rows: list[str] = []
+        pattern = re.compile(r'^\s*(?:>|>>)\s*"?[^"]+"?\s+echo\s+(.+?)\s*$', re.I)
+        for line in text.splitlines():
+            match = pattern.match(line)
+            if match:
+                value = match.group(1).strip()
+                if "," in value:
+                    rows.append(value)
+        if not rows:
+            raise BiometricImportError("invalid_file")
+        return "\n".join(rows)
+
+    def _parse_csv_text(self, text: str) -> list[dict[str, Any]]:
         reader = csv.DictReader(StringIO(text))
+        field_map = self._field_map(reader.fieldnames or [])
         required_fields = {"dni", "marked_at", "mark_type"}
-        if not reader.fieldnames or not required_fields.issubset(
-            set(reader.fieldnames)
-        ):
+        if not required_fields.issubset(set(field_map.values())):
             raise BiometricImportError("invalid_file")
 
         rows: list[dict[str, Any]] = []
         for order, raw_row in enumerate(reader, start=1):
-            marked_at = self._parse_marked_at(raw_row.get("marked_at") or "")
+            normalized_row = self._normalized_csv_row(raw_row, field_map)
+            marked_at = self._parse_marked_at(normalized_row.get("marked_at") or "")
             row = {
                 "row_id": order,
                 "order": order,
-                "dni": (raw_row.get("dni") or "").strip(),
-                "last_names": (raw_row.get("last_names") or "").strip(),
-                "first_names": (raw_row.get("first_names") or "").strip(),
+                "dni": (normalized_row.get("dni") or "").strip(),
+                "last_names": (normalized_row.get("last_names") or "").strip(),
+                "first_names": (normalized_row.get("first_names") or "").strip(),
                 "marked_at": marked_at.isoformat(sep=" "),
-                "mark_type": (raw_row.get("mark_type") or "").strip().lower(),
+                "mark_type": self._normalized_mark_type(
+                    normalized_row.get("mark_type") or ""
+                ),
                 "match": "new",
                 "staff_member_id": None,
                 "resolved": False,
@@ -171,6 +281,43 @@ class BiometricImportService:
         if not rows:
             raise BiometricImportError("invalid_file")
         return rows
+
+    def _field_map(self, fieldnames: list[str]) -> dict[str, str]:
+        aliases = {
+            "dni": "dni",
+            "documento": "dni",
+            "document_number": "dni",
+            "last_names": "last_names",
+            "apellidos": "last_names",
+            "apellido": "last_names",
+            "first_names": "first_names",
+            "nombres": "first_names",
+            "nombre": "first_names",
+            "marked_at": "marked_at",
+            "fecha_hora": "marked_at",
+            "fecha": "marked_at",
+            "datetime": "marked_at",
+            "mark_type": "mark_type",
+            "tipo_marca": "mark_type",
+            "tipo": "mark_type",
+        }
+        return {
+            field_name: aliases.get(field_name.strip().lower(), field_name)
+            for field_name in fieldnames
+        }
+
+    def _normalized_csv_row(
+        self, raw_row: dict[str, str | None], field_map: dict[str, str]
+    ) -> dict[str, str]:
+        row: dict[str, str] = {}
+        for source, target in field_map.items():
+            row[target] = (raw_row.get(source) or "").strip()
+        return row
+
+    def _normalized_mark_type(self, value: str) -> str:
+        normalized = value.strip().lower()
+        aliases = {"entrada": "entry", "ingreso": "entry", "salida": "exit"}
+        return aliases.get(normalized, normalized)
 
     def _apply_match(self, row: dict[str, Any]) -> None:
         staff_member = staff_member_service.get_by_dni(row["dni"])

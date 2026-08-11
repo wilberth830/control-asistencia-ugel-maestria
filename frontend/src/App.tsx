@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import {
   Navigate,
   NavLink,
@@ -45,6 +45,49 @@ type StaffMember = {
   job_title: string;
   employment_status: string | null;
   is_active: "Y" | "N";
+};
+
+type ImportRow = {
+  row_id: number;
+  order: number;
+  dni: string;
+  last_names: string;
+  first_names: string;
+  marked_at?: string;
+  mark_type?: string;
+  match: "matched" | "new";
+  staff_member_id: number | null;
+  resolved?: boolean;
+  skipped?: boolean;
+};
+
+type ImportRowDraft = {
+  dni: string;
+  last_names: string;
+  first_names: string;
+};
+
+type BiometricImport = {
+  id: number;
+  file_name: string;
+  status: "draft" | "confirmed" | "cancelled";
+  period_start: string | null;
+  period_end: string | null;
+  total_rows: number;
+  matched_rows: number;
+  new_rows: number;
+  ok_rows: number;
+  error_rows: number;
+  rows?: ImportRow[];
+};
+
+type AttendanceDay = {
+  id: number;
+  staff_member_id: number;
+  attendance_date: string;
+  status: string;
+  late_minutes: number;
+  justification_id: number | null;
 };
 
 const STORAGE_KEY = "chiquistrukis.session";
@@ -359,59 +402,734 @@ function StaffPage() {
 }
 
 function ImportPage() {
+  const navigate = useNavigate();
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [currentImport, setCurrentImport] = useState<BiometricImport | null>(null);
+  const [imports, setImports] = useState<BiometricImport[]>([]);
+  const [rowDrafts, setRowDrafts] = useState<Record<number, ImportRowDraft>>({});
+  const [loading, setLoading] = useState(false);
+  const [rowLoadingId, setRowLoadingId] = useState<number | null>(null);
+  const [processingLabel, setProcessingLabel] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const syncRowDrafts = (rows: ImportRow[] = []) => {
+    setRowDrafts(
+      Object.fromEntries(
+        rows.map((row) => [
+          row.row_id,
+          {
+            dni: row.dni,
+            last_names: row.last_names,
+            first_names: row.first_names,
+          },
+        ]),
+      ),
+    );
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .get<BiometricImport[]>("/api/v1/biometric-imports")
+      .then((response) => {
+        if (!cancelled) setImports(response.data);
+      })
+      .catch(() => {
+        if (!cancelled) setImports([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    setSelectedFile(file);
+    setCurrentImport(null);
+    setMessage("");
+    setError("");
+    if (file) {
+      await processFile(file);
+    }
+  };
+
+  const uploadFile = async () => {
+    if (!selectedFile) {
+      inputRef.current?.click();
+      return;
+    }
+    await processFile(selectedFile);
+  };
+
+  const processFile = async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    setLoading(true);
+    setError("");
+    setMessage("");
+    setProcessingLabel("Leyendo archivo y validando DNI");
+
+    try {
+      const response = await apiClient.post<BiometricImport>(
+        "/api/v1/biometric-imports",
+        formData,
+      );
+      setCurrentImport(response.data);
+      syncRowDrafts(response.data.rows ?? []);
+      setImports((current) => [
+        response.data,
+        ...current.filter((item) => item.id !== response.data.id),
+      ]);
+      setMessage("Archivo cargado como borrador");
+    } catch {
+      setError("No se pudo subir el archivo. Verifica formato y sesión.");
+    } finally {
+      setLoading(false);
+      setProcessingLabel("");
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!currentImport) return;
+    setLoading(true);
+    setProcessingLabel("Confirmando carga y consolidando asistencia");
+    setError("");
+    setMessage("");
+    try {
+      await apiClient.post<BiometricImport>(
+        `/api/v1/biometric-imports/${currentImport.id}/confirmation`,
+      );
+      setImports((current) =>
+        current.map((item) =>
+          item.id === currentImport.id ? { ...item, status: "confirmed" } : item,
+        ),
+      );
+      navigate(
+        `/asistencia?import_id=${currentImport.id}&file=${encodeURIComponent(
+          currentImport.file_name,
+        )}&month=${currentImport.period_start?.slice(5, 7) ?? ""}&year=${
+          currentImport.period_start?.slice(0, 4) ?? ""
+        }`,
+      );
+    } catch {
+      setError("No se pudo confirmar. Resuelve o registra las filas nuevas.");
+    } finally {
+      setLoading(false);
+      setProcessingLabel("");
+    }
+  };
+
+  const cancelImport = async () => {
+    if (!currentImport) return;
+    setLoading(true);
+    setProcessingLabel("Anulando carga");
+    setError("");
+    setMessage("");
+    try {
+      const response = await apiClient.post<BiometricImport>(
+        `/api/v1/biometric-imports/${currentImport.id}/cancellation`,
+        { reason: "Archivo/mes incorrecto" },
+      );
+      setCurrentImport(response.data);
+      setImports((current) =>
+        current.map((item) => (item.id === response.data.id ? response.data : item)),
+      );
+      setMessage("Carga anulada");
+    } catch {
+      setError("Solo puedes anular una carga confirmada.");
+    } finally {
+      setLoading(false);
+      setProcessingLabel("");
+    }
+  };
+
+  const patchRow = async (row: ImportRow, action: string) => {
+    if (!currentImport) return;
+    const draft = rowDrafts[row.row_id] ?? {
+      dni: row.dni,
+      last_names: row.last_names,
+      first_names: row.first_names,
+    };
+    setRowLoadingId(row.row_id);
+    setError("");
+    setMessage("");
+    try {
+      const response = await apiClient.patch<ImportRow>(
+        `/api/v1/biometric-imports/${currentImport.id}/rows/${row.row_id}`,
+        {
+          action,
+          dni: draft.dni,
+          last_names: draft.last_names,
+          first_names: draft.first_names,
+        },
+      );
+      const updatedRow = response.data;
+      setCurrentImport((current) => {
+        if (!current?.rows) return current;
+        const rows = current.rows.map((item) =>
+          item.row_id === updatedRow.row_id ? updatedRow : item,
+        );
+        const matchedRows = rows.filter((item) => item.match === "matched").length;
+        const newRows = rows.filter(
+          (item) => item.match === "new" && !item.resolved && !item.skipped,
+        ).length;
+        return {
+          ...current,
+          rows,
+          matched_rows: matchedRows,
+          new_rows: newRows,
+        };
+      });
+      syncRowDrafts(
+        (currentImport.rows ?? []).map((item) =>
+          item.row_id === updatedRow.row_id ? updatedRow : item,
+        ),
+      );
+      setMessage("Fila actualizada");
+    } catch {
+      setError("No se pudo actualizar la fila.");
+    } finally {
+      setRowLoadingId(null);
+    }
+  };
+
+  const updateRowDraft = (
+    rowId: number,
+    field: keyof ImportRowDraft,
+    value: string,
+  ) => {
+    setRowDrafts((current) => ({
+      ...current,
+      [rowId]: {
+        dni: current[rowId]?.dni ?? "",
+        last_names: current[rowId]?.last_names ?? "",
+        first_names: current[rowId]?.first_names ?? "",
+        [field]: value,
+      },
+    }));
+  };
+
+  const unresolvedRows =
+    currentImport?.rows?.filter(
+      (row) => row.match === "new" && !row.resolved && !row.skipped,
+    ).length ?? 0;
+
+  const step = !currentImport
+    ? loading
+      ? 2
+      : 1
+    : currentImport.status === "draft" && unresolvedRows > 0
+      ? 2
+      : currentImport.status === "draft"
+        ? 3
+        : 4;
+
   return (
     <>
       <PageHeader
         title="Carga biométrica"
         description="Archivo, validación de DNI, período detectado y confirmación"
       />
+      <div className="wizard-steps">
+        {["Archivo", "Validación", "Confirmación", "Asistencia"].map(
+          (label, index) => (
+            <div
+              className={`wizard-step ${step >= index + 1 ? "active" : ""}`}
+              key={label}
+            >
+              <span>{index + 1}</span>
+              {label}
+            </div>
+          ),
+        )}
+      </div>
+      {loading && (
+        <div className="progress-panel">
+          <div className="progress-header">
+            <strong>Paso {step}: procesando</strong>
+            <span>{processingLabel || "Trabajando"}</span>
+          </div>
+          <div className="progress-track">
+            <div className="progress-bar" />
+          </div>
+        </div>
+      )}
       <section className="card">
         <div className="card-header">Nueva carga</div>
         <div className="card-body">
-          <div className="dropzone">
-            <strong>Seleccionar archivo CSV</strong>
-            <span>Orden original, filas verdes y rojas</span>
-          </div>
+          <label className="dropzone" htmlFor="biometric-file">
+            <strong>{selectedFile ? selectedFile.name : "Seleccionar archivo"}</strong>
+            <span>CSV o BAT de simulación biométrica</span>
+            <input
+              ref={inputRef}
+              accept=".csv,.bat,.cmd,text/csv,text/plain"
+              id="biometric-file"
+              onChange={handleFileChange}
+              type="file"
+            />
+          </label>
+          {message && <div className="alert-success">{message}</div>}
+          {error && <div className="alert-danger">{error}</div>}
           <div className="actions">
-            <button className="btn btn-primary" type="button">
-              Subir archivo
+            <button
+              className="btn btn-primary"
+              disabled={loading}
+              onClick={uploadFile}
+              type="button"
+            >
+              {selectedFile ? "Procesar otra vez" : "Seleccionar archivo"}
             </button>
-            <button className="btn btn-danger-outline" type="button">
+            <button
+              className="btn btn-secondary"
+              disabled={
+                !currentImport ||
+                loading ||
+                currentImport.status !== "draft" ||
+                unresolvedRows > 0
+              }
+              onClick={confirmImport}
+              type="button"
+            >
+              Confirmar carga
+            </button>
+            <button
+              className="btn btn-danger-outline"
+              disabled={!currentImport || loading}
+              onClick={cancelImport}
+              type="button"
+            >
               Anular carga
             </button>
           </div>
         </div>
       </section>
+      {currentImport && (
+        <section className="card">
+          <div className="card-header">
+            Borrador #{currentImport.id} · {statusText(currentImport.status)}
+          </div>
+          <div className="card-body import-summary">
+            <KpiCard
+              label="Período"
+              value={`${currentImport.period_start ?? "-"} / ${
+                currentImport.period_end ?? "-"
+              }`}
+              trend={currentImport.file_name}
+            />
+            <KpiCard
+              accent="green"
+              label="Encontradas"
+              value={currentImport.matched_rows}
+              trend="Filas verdes"
+            />
+            <KpiCard
+              accent="blue"
+              label="Nuevas"
+              value={currentImport.new_rows}
+              trend="Filas rojas"
+            />
+          </div>
+          <ImportRowsTable
+            disabled={currentImport.status !== "draft"}
+            onPatchRow={patchRow}
+            rowLoadingId={rowLoadingId}
+            rowDrafts={rowDrafts}
+            rows={currentImport.rows ?? []}
+            onUpdateDraft={updateRowDraft}
+          />
+        </section>
+      )}
+      <section className="card">
+        <div className="card-header">Historial de cargas</div>
+        <DataTable
+          columns={["Archivo", "Período", "Estado", "Filas"]}
+          rows={imports.map((item) => [
+            item.file_name,
+            `${item.period_start ?? "-"} / ${item.period_end ?? "-"}`,
+            statusText(item.status),
+            String(item.total_rows),
+          ])}
+          emptyText="Sin cargas registradas"
+        />
+      </section>
     </>
   );
 }
 
+function ImportRowsTable({
+  rows,
+  disabled,
+  rowLoadingId,
+  rowDrafts,
+  onPatchRow,
+  onUpdateDraft,
+}: {
+  rows: ImportRow[];
+  disabled: boolean;
+  rowLoadingId: number | null;
+  rowDrafts: Record<number, ImportRowDraft>;
+  onPatchRow: (row: ImportRow, action: string) => void;
+  onUpdateDraft: (
+    rowId: number,
+    field: keyof ImportRowDraft,
+    value: string,
+  ) => void;
+}) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>DNI</th>
+            <th>Apellidos y nombres</th>
+            <th>Fecha/hora</th>
+            <th>Tipo</th>
+            <th>Estado</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length ? (
+            rows.map((row) => {
+              const isResolved = row.match === "matched" || row.resolved || row.skipped;
+              const isEditable = row.match === "new" && !row.skipped && !disabled;
+              const draft = rowDrafts[row.row_id] ?? {
+                dni: row.dni,
+                last_names: row.last_names,
+                first_names: row.first_names,
+              };
+              return (
+                <tr
+                  className={isResolved ? "row-ok" : "row-warning"}
+                  key={row.row_id}
+                >
+                  <td>{row.order}</td>
+                  <td>
+                    {isEditable ? (
+                      <input
+                        className="table-input dni"
+                        maxLength={8}
+                        onChange={(event) =>
+                          onUpdateDraft(row.row_id, "dni", event.target.value)
+                        }
+                        value={draft.dni}
+                      />
+                    ) : (
+                      row.dni
+                    )}
+                  </td>
+                  <td>
+                    {isEditable ? (
+                      <div className="inline-edit-grid">
+                        <input
+                          className="table-input"
+                          onChange={(event) =>
+                            onUpdateDraft(
+                              row.row_id,
+                              "last_names",
+                              event.target.value,
+                            )
+                          }
+                          placeholder="Apellidos"
+                          value={draft.last_names}
+                        />
+                        <input
+                          className="table-input"
+                          onChange={(event) =>
+                            onUpdateDraft(
+                              row.row_id,
+                              "first_names",
+                              event.target.value,
+                            )
+                          }
+                          placeholder="Nombres"
+                          value={draft.first_names}
+                        />
+                      </div>
+                    ) : (
+                      `${row.last_names}, ${row.first_names}`
+                    )}
+                  </td>
+                  <td>{row.marked_at ?? "-"}</td>
+                  <td>{markTypeText(row.mark_type ?? "")}</td>
+                  <td>
+                    {row.skipped
+                      ? "Omitido"
+                      : row.match === "matched"
+                        ? "Encontrado"
+                        : "Nuevo"}
+                  </td>
+                  <td>
+                    {isEditable ? (
+                      <div className="row-actions">
+                        <button
+                          className="btn btn-sm btn-primary"
+                          disabled={rowLoadingId === row.row_id}
+                          onClick={() => onPatchRow(row, "register_new")}
+                          type="button"
+                        >
+                          Registrar nuevo
+                        </button>
+                        <button
+                          className="btn btn-sm btn-secondary"
+                          disabled={rowLoadingId === row.row_id}
+                          onClick={() => onPatchRow(row, "research")}
+                          type="button"
+                        >
+                          Rebuscar
+                        </button>
+                        <button
+                          className="btn btn-sm btn-danger-outline"
+                          disabled={rowLoadingId === row.row_id}
+                          onClick={() => onPatchRow(row, "skip")}
+                          type="button"
+                        >
+                          Omitir
+                        </button>
+                      </div>
+                    ) : (
+                      "-"
+                    )}
+                  </td>
+                </tr>
+              );
+            })
+          ) : (
+            <tr>
+              <td colSpan={7}>Sin filas para mostrar</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function AttendancePage() {
+  const location = useLocation();
+  const query = new URLSearchParams(location.search);
+  const importId = query.get("import_id");
+  const fileName = query.get("file");
+  const initialMonth = Number(query.get("month") || 7);
+  const initialYear = Number(query.get("year") || 2026);
+  const [month, setMonth] = useState(initialMonth);
+  const [year, setYear] = useState(initialYear);
+  const [attendanceRows, setAttendanceRows] = useState<AttendanceDay[]>([]);
+  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
+  const [selectedDay, setSelectedDay] = useState<AttendanceDay | null>(null);
+  const [selectedStatus, setSelectedStatus] = useState("present");
+  const [lateMinutes, setLateMinutes] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const loadAttendance = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [attendanceResponse, staffResponse] = await Promise.all([
+        apiClient.get<AttendanceDay[]>("/api/v1/attendance-records", {
+          params: { month, year },
+        }),
+        apiClient.get<StaffMember[]>("/api/v1/staff-members", {
+          params: { is_active: "Y" },
+        }),
+      ]);
+      setAttendanceRows(attendanceResponse.data);
+      setStaffMembers(staffResponse.data);
+      setSelectedDay(attendanceResponse.data[0] ?? null);
+      setSelectedStatus(attendanceResponse.data[0]?.status ?? "present");
+      setLateMinutes(attendanceResponse.data[0]?.late_minutes ?? 0);
+    } catch {
+      setError("No se pudo cargar la asistencia.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      apiClient.get<AttendanceDay[]>("/api/v1/attendance-records", {
+        params: { month: initialMonth, year: initialYear },
+      }),
+      apiClient.get<StaffMember[]>("/api/v1/staff-members", {
+        params: { is_active: "Y" },
+      }),
+    ])
+      .then(([attendanceResponse, staffResponse]) => {
+        if (cancelled) return;
+        setAttendanceRows(attendanceResponse.data);
+        setStaffMembers(staffResponse.data);
+        setSelectedDay(attendanceResponse.data[0] ?? null);
+        setSelectedStatus(attendanceResponse.data[0]?.status ?? "present");
+        setLateMinutes(attendanceResponse.data[0]?.late_minutes ?? 0);
+      })
+      .catch(() => {
+        if (!cancelled) setError("No se pudo cargar la asistencia.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialMonth, initialYear]);
+
+  const selectDay = (row: AttendanceDay) => {
+    setSelectedDay(row);
+    setSelectedStatus(row.status);
+    setLateMinutes(row.late_minutes);
+    setMessage("");
+    setError("");
+  };
+
+  const saveDay = async () => {
+    if (!selectedDay) return;
+    setLoading(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await apiClient.put<AttendanceDay>(
+        "/api/v1/attendance-records/days",
+        {
+          staff_member_id: selectedDay.staff_member_id,
+          attendance_date: selectedDay.attendance_date,
+          status: selectedStatus,
+          late_minutes: lateMinutes,
+          justification_id: selectedDay.justification_id,
+        },
+      );
+      setAttendanceRows((rows) =>
+        rows.map((row) => (row.id === response.data.id ? response.data : row)),
+      );
+      setSelectedDay(response.data);
+      setMessage("Día actualizado");
+    } catch {
+      setError("No se pudo guardar el día.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const staffById = Object.fromEntries(staffMembers.map((staff) => [staff.id, staff]));
+
   return (
     <>
       <PageHeader
         title="Asistencia"
         description="Grilla mensual y panel diario de edición"
       />
-      <Filters />
+      {importId && (
+        <div className="context-banner">
+          <strong>Carga confirmada #{importId}</strong>
+          <span>
+            {fileName ?? "Archivo biométrico"} · Período{" "}
+            {month && year ? `${String(month).padStart(2, "0")}/${year}` : "detectado"}
+          </span>
+        </div>
+      )}
+      <div className="filters">
+        <label className="form-field">
+          <span>Mes</span>
+          <select
+            onChange={(event) => setMonth(Number(event.target.value))}
+            value={month}
+          >
+            <option value="7">Julio</option>
+            <option value="6">Junio</option>
+            <option value="5">Mayo</option>
+          </select>
+        </label>
+        <label className="form-field">
+          <span>Año</span>
+          <select onChange={(event) => setYear(Number(event.target.value))} value={year}>
+            <option value="2026">2026</option>
+          </select>
+        </label>
+        <div className="filter-actions">
+          <button
+            className="btn btn-sm btn-primary"
+            disabled={loading}
+            onClick={loadAttendance}
+            type="button"
+          >
+            Aplicar
+          </button>
+        </div>
+      </div>
+      {message && <div className="alert-success">{message}</div>}
+      {error && <div className="alert-danger">{error}</div>}
       <div className="attendance-layout">
         <section className="card attendance-grid">
-          <div className="card-header">Anexo 03 · Julio 2026</div>
-          <DataTable
-            columns={["Personal", "01", "02", "03", "04", "05"]}
-            rows={[
-              ["Quispe Mamani, Maria Elena", "A", "T", "A", "J", "A"],
-              ["Huaman Rojas, Carlos Alberto", "A", "A", "F", "A", "A"],
-            ]}
+          <div className="card-header">
+            Asistencia cargada · {String(month).padStart(2, "0")}/{year}
+          </div>
+          <SelectableDataTable
+            columns={["Personal", "DNI", "Fecha", "Estado", "Tardanza"]}
+            emptyText="Sin asistencia para el período seleccionado"
+            onSelect={selectDay}
+            rows={attendanceRows}
+            renderRow={(row) => {
+              const staff = staffById[row.staff_member_id];
+              return [
+                staff
+                  ? `${staff.last_names}, ${staff.first_names}`
+                  : `ID ${row.staff_member_id}`,
+                staff?.dni ?? "-",
+                row.attendance_date,
+                attendanceStatusText(row.status),
+                String(row.late_minutes),
+              ];
+            }}
           />
         </section>
         <section className="card attendance-panel">
           <div className="card-header">Día</div>
           <div className="card-body panel-stack">
-            <KpiCard label="Fecha" value="03" trend="Julio 2026" />
-            <span className="badge badge-warning">Tardanza</span>
-            <button className="btn btn-secondary" type="button">
-              Editar estado
+            <KpiCard
+              label="Fecha"
+              value={selectedDay?.attendance_date ?? "-"}
+              trend={
+                selectedDay
+                  ? staffById[selectedDay.staff_member_id]?.dni ?? "Personal"
+                  : "Seleccione una fila"
+              }
+            />
+            <label className="form-field">
+              <span>Estado</span>
+              <select
+                disabled={!selectedDay}
+                onChange={(event) => setSelectedStatus(event.target.value)}
+                value={selectedStatus}
+              >
+                {attendanceStatuses.map((status) => (
+                  <option key={status.value} value={status.value}>
+                    {status.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Minutos tardanza</span>
+              <input
+                disabled={!selectedDay}
+                min="0"
+                onChange={(event) => setLateMinutes(Number(event.target.value))}
+                type="number"
+                value={lateMinutes}
+              />
+            </label>
+            <button
+              className="btn btn-secondary"
+              disabled={!selectedDay || loading}
+              onClick={saveDay}
+              type="button"
+            >
+              Guardar día
             </button>
           </div>
         </section>
@@ -597,6 +1315,49 @@ function DataTable({
   );
 }
 
+function SelectableDataTable<T extends { id: number }>({
+  columns,
+  rows,
+  renderRow,
+  onSelect,
+  emptyText = "Sin registros",
+}: {
+  columns: string[];
+  rows: T[];
+  renderRow: (row: T) => string[];
+  onSelect: (row: T) => void;
+  emptyText?: string;
+}) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th key={column}>{column}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length ? (
+            rows.map((row) => (
+              <tr className="clickable-row" key={row.id} onClick={() => onSelect(row)}>
+                {renderRow(row).map((cell, index) => (
+                  <td key={`${row.id}-${index}`}>{cell}</td>
+                ))}
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td colSpan={columns.length}>{emptyText}</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 const statusLabels = [
   { key: "present", label: "Asistencia", className: "success" },
   { key: "late", label: "Tardanza", className: "warning" },
@@ -606,6 +1367,15 @@ const statusLabels = [
   { key: "permission", label: "Permiso", className: "muted" },
 ];
 
+const attendanceStatuses = [
+  { value: "present", label: "Asistencia" },
+  { value: "late", label: "Tardanza" },
+  { value: "absent", label: "Inasistencia" },
+  { value: "justified", label: "Justificado" },
+  { value: "leave", label: "Licencia" },
+  { value: "permission", label: "Permiso" },
+];
+
 function statusText(status: string) {
   const labels: Record<string, string> = {
     draft: "Borrador",
@@ -613,6 +1383,19 @@ function statusText(status: string) {
     cancelled: "Anulada",
   };
   return labels[status] ?? status;
+}
+
+function markTypeText(markType: string) {
+  const labels: Record<string, string> = {
+    entry: "Entrada",
+    exit: "Salida",
+  };
+  return labels[markType] ?? markType;
+}
+
+function attendanceStatusText(status: string) {
+  const label = attendanceStatuses.find((item) => item.value === status)?.label;
+  return label ?? status;
 }
 
 export default App;

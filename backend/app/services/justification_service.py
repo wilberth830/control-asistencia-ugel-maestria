@@ -6,6 +6,8 @@ from copy import deepcopy
 from datetime import date
 from typing import Any
 
+from app.repositories.justification_repository import justification_repository
+from app.repositories.oracle import OracleRepositoryError
 from app.services.attendance_service import attendance_service
 
 
@@ -28,6 +30,18 @@ class JustificationService:
 
     def create(self, data: dict[str, Any]) -> dict[str, Any]:
         payload = self._validated_payload(data)
+        try:
+            item = justification_repository.create(payload)
+            attendance_service.apply_justification_range(
+                justification_id=item["id"],
+                staff_member_id=item["staff_member_id"],
+                start_date=date.fromisoformat(item["start_date"]),
+                end_date=date.fromisoformat(item["end_date"]),
+            )
+            return item
+        except OracleRepositoryError:
+            pass
+
         self._seq += 1
         item = {**payload, "id": self._seq, "status": "active"}
         self._items[self._seq] = item
@@ -40,9 +54,31 @@ class JustificationService:
         return deepcopy(item)
 
     def update(self, justification_id: int, data: dict[str, Any]) -> dict[str, Any]:
+        payload = self._validated_payload(data)
+        try:
+            old_item = justification_repository.get(justification_id)
+            if old_item is None:
+                raise JustificationNotFoundError(
+                    f"Justification {justification_id} not found"
+                )
+            item = justification_repository.update(justification_id, payload)
+            if item is None:
+                raise JustificationNotFoundError(
+                    f"Justification {justification_id} not found"
+                )
+            attendance_service.cancel_justification(justification_id)
+            attendance_service.apply_justification_range(
+                justification_id=justification_id,
+                staff_member_id=item["staff_member_id"],
+                start_date=date.fromisoformat(item["start_date"]),
+                end_date=date.fromisoformat(item["end_date"]),
+            )
+            return {"old": old_item, "new": item}
+        except OracleRepositoryError:
+            pass
+
         item = self._find(justification_id)
         old_item = deepcopy(item)
-        payload = self._validated_payload(data)
         item.update(payload)
         attendance_service.cancel_justification(justification_id)
         attendance_service.apply_justification_range(
@@ -56,6 +92,11 @@ class JustificationService:
     def list(
         self, staff_member_id: int | None = None, status: str | None = None
     ) -> list[dict[str, Any]]:
+        try:
+            return justification_repository.list(staff_member_id, status)
+        except OracleRepositoryError:
+            pass
+
         rows = list(self._items.values())
         if staff_member_id:
             rows = [
@@ -66,6 +107,18 @@ class JustificationService:
         return [deepcopy(row) for row in rows]
 
     def cancel(self, justification_id: int, reason: str) -> dict[str, Any]:
+        try:
+            item = justification_repository.cancel(justification_id)
+            if item is None:
+                raise JustificationNotFoundError(
+                    f"Justification {justification_id} not found"
+                )
+            attendance_service.cancel_justification(justification_id)
+            item["cancel_reason"] = reason
+            return item
+        except OracleRepositoryError:
+            pass
+
         item = self._find(justification_id)
         item["status"] = "cancelled"
         item["cancel_reason"] = reason

@@ -13,6 +13,19 @@ CSV_CONTENT = (
     "99999999,Nuevo Demo,Carga,2026-07-02 15:05:00,exit\n"
 )
 
+SPANISH_CSV_CONTENT = (
+    "dni,apellidos,nombres,fecha_hora,tipo_marca\n"
+    "45678912,Quispe Mamani,Maria Elena,2026-06-16 07:55:12,entrada\n"
+    "45678912,Quispe Mamani,Maria Elena,2026-06-16 13:02:41,salida\n"
+)
+
+BAT_CONTENT = rb"""
+@echo off
+> "%OUTFILE%" echo dni,apellidos,nombres,fecha_hora,tipo_marca
+>> "%OUTFILE%" echo 45678912,Quispe Mamani,Maria Elena,2026-06-16 07:55:12,entrada
+>> "%OUTFILE%" echo 99998888,Perez Soto,Juan Carlos,2026-06-16 08:10:00,entrada
+"""
+
 
 @pytest.fixture(autouse=True)
 def reset_demo_data() -> None:
@@ -54,6 +67,46 @@ def test_create_import_reads_csv_in_order_and_detects_period(
     assert [row["order"] for row in payload["rows"]] == [1, 2]
     assert payload["rows"][0]["match"] == "matched"
     assert payload["rows"][1]["match"] == "new"
+
+
+def test_create_import_accepts_spanish_biometric_csv(
+    auth_headers: dict[str, str],
+) -> None:
+    response = TestClient(app).post(
+        "/api/v1/biometric-imports",
+        files={"file": ("marcas.csv", SPANISH_CSV_CONTENT, "text/csv")},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["period_start"] == "2026-06-16"
+    assert payload["period_end"] == "2026-06-16"
+    assert payload["rows"][0]["mark_type"] == "entry"
+    assert payload["rows"][1]["mark_type"] == "exit"
+
+
+def test_create_import_accepts_batch_generator_file(
+    auth_headers: dict[str, str],
+) -> None:
+    response = TestClient(app).post(
+        "/api/v1/biometric-imports",
+        files={
+            "file": (
+                "simular_marcas_biometricas.bat",
+                BAT_CONTENT,
+                "application/octet-stream",
+            )
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["total_rows"] == 2
+    assert payload["matched_rows"] == 1
+    assert payload["new_rows"] == 1
+    assert payload["rows"][1]["dni"] == "99998888"
 
 
 def test_confirm_requires_new_rows_to_be_resolved(

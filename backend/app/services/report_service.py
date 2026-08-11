@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from typing import Any
 
+from app.repositories.institution_repository import institution_repository
+from app.repositories.oracle import OracleRepositoryError
 from app.services.attendance_service import attendance_service
 from app.services.staff_member_service import (
     StaffMemberNotFoundError,
@@ -24,7 +26,7 @@ class ReportService:
     def annex_03(
         self, month: int, year: int, institution: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        inst = institution or DEMO_INSTITUTION
+        inst = institution or self._institution()
         attendance_rows = attendance_service.list_month(month, year)
         rows_by_staff: dict[int, list[dict[str, Any]]] = defaultdict(list)
         for row in attendance_rows:
@@ -54,7 +56,7 @@ class ReportService:
         totals = Counter(row["status"] for row in attendance_rows)
         staff_member_ids = {row["staff_member_id"] for row in attendance_rows}
         return {
-            "institution": DEMO_INSTITUTION,
+            "institution": self._institution(),
             "period": {"month": month, "year": year},
             "source": "attendance_day",
             "staff_count": len(staff_member_ids),
@@ -80,6 +82,12 @@ class ReportService:
 
     def _full_name(self, staff_member: dict[str, Any]) -> str:
         return f"{staff_member['last_names']}, {staff_member['first_names']}"
+
+    def _institution(self) -> dict[str, Any]:
+        try:
+            return institution_repository.get_active() or DEMO_INSTITUTION
+        except OracleRepositoryError:
+            return DEMO_INSTITUTION
 
 
 report_service = ReportService()

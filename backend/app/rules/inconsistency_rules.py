@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.config import settings
+from app.services.ai_inconsistency_service import ai_suggestion_service
+
 
 def detect_basic_issues(marks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Deterministic rules: duplicate same day, missing pair, invalid timestamp flag."""
@@ -26,5 +29,7 @@ def detect_basic_issues(marks: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def ia_suggest(marks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Placeholder for ML service — returns empty or low-confidence hints only."""
-    return []
+    """Placeholder for an AI provider. Disabled by default; never auto-writes."""
+    if not settings.ai_enabled:
+        return []
+    return ai_suggestion_service.suggest(marks)

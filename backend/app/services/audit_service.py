@@ -5,6 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from app.repositories.audit_repository import audit_repository
+from app.repositories.oracle import OracleRepositoryError
+
 
 class AuditService:
     def __init__(self) -> None:
@@ -30,7 +33,17 @@ class AuditService:
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         self._memory.append(entry)
-        # TODO: INSERT INTO audit_log when Oracle repository is wired
+        try:
+            audit_repository.record(
+                user_id=user_id,
+                entity_name=entity_name,
+                entity_id=entity_id,
+                action_name=action_name,
+                old_value=old_value,
+                new_value=new_value,
+            )
+        except OracleRepositoryError:
+            pass
         return entry
 
 

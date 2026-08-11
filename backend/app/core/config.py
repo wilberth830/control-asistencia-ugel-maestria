@@ -21,5 +21,11 @@ class Settings(BaseSettings):
     app_use_demo_store: bool = True
     app_allow_memory_session: bool = True
 
+    ai_enabled: bool = False
+    ai_provider: str = ""
+    ai_model: str = ""
+    ai_min_confidence: float = 0.7
+    openai_api_key: str = ""
+
 
 settings = Settings()

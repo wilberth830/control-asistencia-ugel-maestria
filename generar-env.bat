@@ -62,6 +62,12 @@ echo.
     echo REDIS_URL="redis://127.0.0.1:6379/0"
     echo ACCESS_TOKEN_EXPIRE_MINUTES="60"
     echo APP_ALLOW_MEMORY_SESSION="true"
+    echo.
+    echo AI_ENABLED="false"
+    echo AI_PROVIDER="true"
+    echo AI_MODEL="openai"
+    echo AI_MIN_CONFIDENCE="gpt-5.2"
+    echo OPENAI_API_KEY=""
 ) > "%BASE_DIR%backend\.env"
 
 if errorlevel 1 (

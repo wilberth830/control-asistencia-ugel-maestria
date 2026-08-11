@@ -6,6 +6,9 @@ from copy import deepcopy
 from datetime import date
 from typing import Any
 
+from app.repositories.attendance_day_repository import attendance_day_repository
+from app.repositories.oracle import OracleRepositoryError
+
 VALID_ATTENDANCE_STATUSES = {
     "present",
     "late",
@@ -39,6 +42,17 @@ class AttendanceService:
     ) -> dict[str, Any]:
         self._validate(status, late_minutes)
         parsed_date = self._parse_date(attendance_date)
+        try:
+            return attendance_day_repository.upsert(
+                staff_member_id=staff_member_id,
+                attendance_date=parsed_date,
+                status=status,
+                late_minutes=late_minutes,
+                justification_id=justification_id,
+            )
+        except OracleRepositoryError:
+            pass
+
         key = self._key(staff_member_id, parsed_date.isoformat())
         old = self._days.get(key)
         row_id = old["id"] if old else self._next_id()
@@ -77,6 +91,11 @@ class AttendanceService:
         return rows
 
     def cancel_justification(self, justification_id: int) -> list[dict[str, Any]]:
+        try:
+            return attendance_day_repository.clear_justification(justification_id)
+        except OracleRepositoryError:
+            pass
+
         changed = []
         for row in self._days.values():
             if row.get("justification_id") == justification_id:
@@ -91,6 +110,13 @@ class AttendanceService:
     ) -> list[dict[str, Any]]:
         if month < 1 or month > 12:
             raise AttendanceValidationError("invalid_month")
+        try:
+            return attendance_day_repository.list_month(
+                month=month, year=year, staff_member_id=staff_member_id
+            )
+        except OracleRepositoryError:
+            pass
+
         prefix = f"{year:04d}-{month:02d}"
         out = []
         for row in self._days.values():

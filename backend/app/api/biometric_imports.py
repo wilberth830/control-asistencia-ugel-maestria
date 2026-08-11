@@ -30,7 +30,7 @@ async def create_import(
     content = await file.read()
     try:
         imp = biometric_import_service.create_draft_from_csv(
-            file.filename or "upload.csv", content
+            file.filename or "upload.csv", content, session.get("user_id")
         )
     except BiometricImportError as exc:
         if exc.code == "invalid_file":
