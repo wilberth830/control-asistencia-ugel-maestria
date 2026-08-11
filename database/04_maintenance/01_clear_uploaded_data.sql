@@ -18,6 +18,7 @@ DECLARE
     v_inconsistency_deleted    NUMBER := 0;
     v_mark_deleted             NUMBER := 0;
     v_import_deleted           NUMBER := 0;
+    v_ai_usage_deleted         NUMBER := 0;
     v_staff_relation_deleted   NUMBER := 0;
     v_staff_deleted            NUMBER := 0;
     v_audit_deleted            NUMBER := 0;
@@ -30,6 +31,9 @@ BEGIN
         'inconsistency'
     );
     v_audit_deleted := SQL%ROWCOUNT;
+
+    DELETE FROM ai_usage_log;
+    v_ai_usage_deleted := SQL%ROWCOUNT;
 
     DELETE FROM attendance_day;
     v_attendance_deleted := SQL%ROWCOUNT;
@@ -74,6 +78,7 @@ BEGIN
     COMMIT;
 
     DBMS_OUTPUT.PUT_LINE('[OK] audit_log borrados: ' || v_audit_deleted);
+    DBMS_OUTPUT.PUT_LINE('[OK] ai_usage_log borrados: ' || v_ai_usage_deleted);
     DBMS_OUTPUT.PUT_LINE('[OK] attendance_day borrados: ' || v_attendance_deleted);
     DBMS_OUTPUT.PUT_LINE('[OK] inconsistency borrados: ' || v_inconsistency_deleted);
     DBMS_OUTPUT.PUT_LINE('[OK] biometric_mark borrados: ' || v_mark_deleted);

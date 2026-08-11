@@ -60,7 +60,7 @@ Si `DB_PASSWORD` no está definido, `ejecutar-bd.bat` lo pedirá en consola sin 
 
 ## Entidades
 
-`user_account`, `institution`, `staff_member`, `staff_institution`, `biometric_import`, `biometric_mark`, `inconsistency`, `justification`, `attendance_day` (**fuente de verdad**) y `audit_log`.
+`user_account`, `institution`, `staff_member`, `staff_institution`, `biometric_import`, `biometric_mark`, `inconsistency`, `justification`, `attendance_day` (**fuente de verdad**), `audit_log` y `ai_usage_log`.
 
 ## Reglas de seguridad
 

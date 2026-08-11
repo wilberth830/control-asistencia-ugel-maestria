@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services.ai_biometric_normalizer_service import AINormalizationResult
 from app.services.attendance_service import attendance_service
 from app.services.biometric_import_service import biometric_import_service
 from app.services.staff_member_service import staff_member_service
@@ -24,6 +27,17 @@ DUPLICATE_NEW_DNI_CSV = (
     "dni,last_names,first_names,marked_at,mark_type\n"
     "99990000,Nuevo Repetido,Carga,2026-07-01 07:42:00,entry\n"
     "99990000,Nuevo Repetido,Carga,2026-07-01 13:05:00,exit\n"
+)
+
+SEMICOLON_DAT_CONTENT = (
+    "document;last_name;first_name;punch_time;direction\n"
+    "45678912;Quispe Mamani;Maria Elena;2026-05-02 07:55:00;in\n"
+    "45678912;Quispe Mamani;Maria Elena;2026-05-02 13:02:00;out\n"
+)
+
+UNKNOWN_BIOMETRIC_CONTENT = (
+    "codigo|trabajador|momento|evento\n"
+    "45678912|Maria Elena Quispe Mamani|2026/05/03 07:55:00|ENT\n"
 )
 
 BAT_CONTENT = rb"""
@@ -115,6 +129,107 @@ def test_create_import_accepts_batch_generator_file(
     assert payload["matched_rows"] == 1
     assert payload["new_rows"] == 1
     assert payload["rows"][1]["dni"] == "99998888"
+
+
+def test_create_import_accepts_dat_with_device_aliases(
+    auth_headers: dict[str, str],
+) -> None:
+    response = TestClient(app).post(
+        "/api/v1/biometric-imports",
+        files={"file": ("device.dat", SEMICOLON_DAT_CONTENT, "text/plain")},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["total_rows"] == 2
+    assert payload["rows"][0]["mark_type"] == "entry"
+    assert payload["rows"][1]["mark_type"] == "exit"
+
+
+def test_create_import_uses_ai_normalizer_when_required_fields_are_unknown(
+    auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services import biometric_import_service as import_service_module
+
+    monkeypatch.setattr(
+        import_service_module.ai_biometric_normalizer_service,
+        "normalize_to_csv",
+        lambda text: AINormalizationResult(
+            csv_text=(
+                "dni,apellidos,nombres,fecha_hora,tipo_marca\n"
+                "45678912,Quispe Mamani,Maria Elena,2026-05-03 07:55:00,entrada\n"
+            ),
+            source="local_fallback",
+        ),
+    )
+
+    response = TestClient(app).post(
+        "/api/v1/biometric-imports",
+        files={"file": ("unknown.dat", UNKNOWN_BIOMETRIC_CONTENT, "text/plain")},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["total_rows"] == 1
+    assert payload["rows"][0]["dni"] == "45678912"
+    assert payload["rows"][0]["mark_type"] == "entry"
+
+
+def test_create_import_adds_ai_cost_to_file_name_and_records_usage(
+    auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services import biometric_import_service as import_service_module
+
+    recorded: list[dict] = []
+
+    monkeypatch.setattr(
+        import_service_module.ai_biometric_normalizer_service,
+        "normalize_to_csv",
+        lambda text: AINormalizationResult(
+            csv_text=(
+                "dni,apellidos,nombres,fecha_hora,tipo_marca\n"
+                "45678912,Quispe Mamani,Maria Elena,2026-05-03 07:55:00,entrada\n"
+            ),
+            source="openai",
+            provider="openai",
+            model="gpt-5.2",
+            input_tokens=100,
+            output_tokens=10,
+            total_tokens=110,
+            estimated_cost_usd=Decimal("0.000315"),
+        ),
+    )
+    monkeypatch.setattr(
+        import_service_module.ai_usage_repository,
+        "record",
+        lambda data: recorded.append(data),
+    )
+
+    response = TestClient(app).post(
+        "/api/v1/biometric-imports",
+        files={"file": ("unknown.dat", UNKNOWN_BIOMETRIC_CONTENT, "text/plain")},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert "_ia_usd_0_000315.dat" in payload["file_name"]
+    assert payload["normalization_source"] == "openai"
+    assert payload["ai_estimated_cost_usd"] == "0.000315"
+    assert recorded == [
+        {
+            "biometric_import_id": payload["id"],
+            "file_name": payload["file_name"],
+            "provider": "openai",
+            "model_name": "gpt-5.2",
+            "input_tokens": 100,
+            "output_tokens": 10,
+            "total_tokens": 110,
+            "estimated_cost_usd": "0.000315",
+        }
+    ]
 
 
 def test_confirm_auto_registers_new_rows(

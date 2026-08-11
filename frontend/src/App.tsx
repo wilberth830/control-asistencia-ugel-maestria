@@ -108,6 +108,8 @@ type BiometricImport = {
   new_rows: number;
   ok_rows: number;
   error_rows: number;
+  normalization_source?: "parser" | "local_fallback" | "openai";
+  ai_estimated_cost_usd?: string;
   rows?: ImportRow[];
 };
 
@@ -842,7 +844,7 @@ function ImportPage() {
     setImportAction("process");
     setError("");
     setMessage("");
-    setProcessingLabel("Leyendo archivo y validando DNI");
+    setProcessingLabel("Analizando archivo, normalizando formato y validando DNI");
 
     try {
       const response = await apiClient.post<BiometricImport>(
@@ -1045,7 +1047,9 @@ function ImportPage() {
         <div className="card-header">Nueva carga</div>
         <div className="card-body">
           <label className="dropzone" htmlFor="biometric-file">
-            <strong>{selectedFile ? selectedFile.name : "Seleccionar archivo"}</strong>
+            <strong className="file-name-text">
+              {selectedFile ? selectedFile.name : "Seleccionar archivo"}
+            </strong>
             <span>CSV o BAT de simulación biométrica</span>
             <input
               ref={inputRef}
@@ -1126,7 +1130,12 @@ function ImportPage() {
             <KpiCard
               label="Archivo"
               value={currentImport.file_name}
-              trend={`Borrador #${currentImport.id}`}
+              trend={
+                currentImport.normalization_source === "openai"
+                  ? `Borrador #${currentImport.id} · IA $${currentImport.ai_estimated_cost_usd ?? "0"}`
+                  : `Borrador #${currentImport.id}`
+              }
+              valueClassName="file-name-text"
             />
             <KpiCard
               label="Período"
@@ -1343,6 +1352,8 @@ function AttendancePage() {
   const initialYear = Number(query.get("year") || 2026);
   const [month, setMonth] = useState(initialMonth);
   const [year, setYear] = useState(initialYear);
+  const [loadedMonth, setLoadedMonth] = useState(initialMonth);
+  const [loadedYear, setLoadedYear] = useState(initialYear);
   const [selectedImportId, setSelectedImportId] = useState(
     importId ? Number(importId) : 0,
   );
@@ -1391,6 +1402,8 @@ function AttendancePage() {
       ]);
       setAttendanceRows(attendanceResponse.data);
       setStaffMembers(staffResponse.data);
+      setLoadedMonth(nextMonth);
+      setLoadedYear(nextYear);
       setSelectedDay(null);
       setSelectedStatus("present");
       setLateMinutes(0);
@@ -1456,6 +1469,8 @@ function AttendancePage() {
         );
         if (cancelled) return;
         setAttendanceRows(attendanceResponse.data);
+        setLoadedMonth(selectedPeriod.month);
+        setLoadedYear(selectedPeriod.year);
         setSelectedDay(null);
         setSelectedStatus("present");
         setLateMinutes(0);
@@ -1481,14 +1496,6 @@ function AttendancePage() {
       : importsForMonth[0]?.id ?? 0;
     setMonthImports(importsForMonth);
     setSelectedImportId(nextImportId);
-    if (!nextImportId) {
-      setAttendanceRows([]);
-      setSelectedDay(null);
-      setSelectedStatus("present");
-      setLateMinutes(0);
-      setLockedDayKey("");
-      setError("");
-    }
   };
 
   const selectImport = (nextImportId: number) => {
@@ -1662,15 +1669,15 @@ function AttendancePage() {
       <div className="attendance-layout">
         <section className="card attendance-grid">
           <div className="card-header">
-            Asistencia cargada · {String(month).padStart(2, "0")}/{year}
+            Asistencia cargada · {String(loadedMonth).padStart(2, "0")}/{loadedYear}
           </div>
           <AttendanceMonthGrid
-            month={month}
+            month={loadedMonth}
             onSelect={selectDay}
             rows={attendanceRows}
             selectedDayKey={selectedDayKey}
             staffById={staffById}
-            year={year}
+            year={loadedYear}
           />
         </section>
         <section className="card attendance-panel">
@@ -1973,16 +1980,18 @@ function KpiCard({
   value,
   trend,
   accent = "",
+  valueClassName = "",
 }: {
   label: string;
   value: string | number;
   trend: string;
   accent?: string;
+  valueClassName?: string;
 }) {
   return (
     <div className={`kpi-card ${accent}`}>
       <div className="label">{label}</div>
-      <div className="value">{value}</div>
+      <div className={`value ${valueClassName}`}>{value}</div>
       <div className="trend">{trend}</div>
     </div>
   );

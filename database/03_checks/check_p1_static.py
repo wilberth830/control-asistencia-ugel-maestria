@@ -20,6 +20,7 @@ EXPECTED_TABLES = [
     "justification",
     "attendance_day",
     "audit_log",
+    "ai_usage_log",
 ]
 
 EXPECTED_STATEMENTS = [
@@ -30,6 +31,8 @@ EXPECTED_STATEMENTS = [
     "CREATE INDEX ix_biometric_import_status ON biometric_import (status, period_start)",
     "CREATE INDEX ix_attendance_day_import ON attendance_day (biometric_import_id, attendance_date)",
     "CREATE INDEX ix_audit_log_entity ON audit_log (entity_name, entity_id)",
+    "CREATE INDEX ix_ai_usage_import ON ai_usage_log (biometric_import_id, created_at)",
+    "CONSTRAINT fk_ai_usage_import FOREIGN KEY (biometric_import_id) REFERENCES biometric_import (id)",
     "MERGE INTO user_account target",
     "MERGE INTO institution target",
     "MERGE INTO staff_member target",

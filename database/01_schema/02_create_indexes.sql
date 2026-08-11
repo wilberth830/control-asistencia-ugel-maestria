@@ -79,6 +79,8 @@ BEGIN
         'CREATE INDEX ix_attendance_day_import ON attendance_day (biometric_import_id, attendance_date)');
     create_index_if_missing('ix_audit_log_entity', 'audit_log', 'entity_name,entity_id',
         'CREATE INDEX ix_audit_log_entity ON audit_log (entity_name, entity_id)');
+    create_index_if_missing('ix_ai_usage_import', 'ai_usage_log', 'biometric_import_id,created_at',
+        'CREATE INDEX ix_ai_usage_import ON ai_usage_log (biometric_import_id, created_at)');
 END;
 /
 

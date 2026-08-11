@@ -613,6 +613,11 @@ select {
   font-weight: 700;
 }
 
+.kpi-card .value.file-name-text {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
 .kpi-card .trend {
   color: var(--text-muted);
   font-size: 11px;
@@ -865,6 +870,11 @@ tbody tr:last-child td {
 
 .dropzone strong {
   color: var(--primary);
+}
+
+.file-name-text {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .dropzone input {

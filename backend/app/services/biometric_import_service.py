@@ -10,7 +10,12 @@ import re
 from typing import Any
 
 from app.repositories.biometric_repository import biometric_repository
+from app.repositories.ai_usage_repository import ai_usage_repository
 from app.repositories.oracle import OracleRepositoryError
+from app.services.ai_biometric_normalizer_service import (
+    AINormalizationResult,
+    ai_biometric_normalizer_service,
+)
 from app.services.staff_member_service import (
     StaffMemberConflictError,
     staff_member_service,
@@ -67,9 +72,15 @@ class BiometricImportService:
     def create_draft_from_csv(
         self, file_name: str, content: bytes, user_account_id: int | None = None
     ) -> dict[str, Any]:
-        rows = self._parse_input_file(file_name, content)
+        rows, ai_usage = self._parse_input_file(file_name, content)
+        final_file_name = self._timestamped_file_name(file_name)
+        if ai_usage and ai_usage.source == "openai":
+            final_file_name = self._file_name_with_ai_cost(
+                final_file_name, ai_usage.estimated_cost_usd
+            )
+        final_file_name = self._fit_file_name(final_file_name)
         return self._create_draft(
-            self._timestamped_file_name(file_name), rows, user_account_id
+            final_file_name, rows, user_account_id, ai_usage
         )
 
     def get(self, import_id: int) -> dict[str, Any] | None:
@@ -214,6 +225,7 @@ class BiometricImportService:
         file_name: str,
         rows: list[dict[str, Any]],
         user_account_id: int | None = None,
+        ai_usage: AINormalizationResult | None = None,
     ) -> dict[str, Any]:
         imp = {
             "id": 0,
@@ -229,6 +241,10 @@ class BiometricImportService:
             "ok_rows": 0,
             "error_rows": 0,
             "rows": rows,
+            "normalization_source": ai_usage.source if ai_usage else "parser",
+            "ai_estimated_cost_usd": (
+                str(ai_usage.estimated_cost_usd) if ai_usage else "0"
+            ),
         }
         self._refresh_counters(imp)
         try:
@@ -237,6 +253,8 @@ class BiometricImportService:
         except OracleRepositoryError:
             self._seq += 1
             imp["id"] = self._seq
+        if ai_usage and ai_usage.source == "openai":
+            self._record_ai_usage(imp, ai_usage)
         self._imports[imp["id"]] = imp
         return deepcopy(imp)
 
@@ -246,6 +264,44 @@ class BiometricImportService:
             return f"{file_name}_{timestamp}"
         stem, extension = file_name.rsplit(".", 1)
         return f"{stem}_{timestamp}.{extension}"
+
+    def _file_name_with_ai_cost(self, file_name: str, cost: Any) -> str:
+        suffix = f"ia_usd_{str(cost).replace('.', '_')}"
+        if "." not in file_name:
+            return f"{file_name}_{suffix}"
+        stem, extension = file_name.rsplit(".", 1)
+        return f"{stem}_{suffix}.{extension}"
+
+    def _fit_file_name(self, file_name: str, max_length: int = 255) -> str:
+        if len(file_name) <= max_length:
+            return file_name
+        if "." not in file_name:
+            return file_name[:max_length]
+        stem, extension = file_name.rsplit(".", 1)
+        extension_part = f".{extension}"
+        available_stem_length = max_length - len(extension_part)
+        if available_stem_length <= 0:
+            return file_name[:max_length]
+        return f"{stem[:available_stem_length]}{extension_part}"
+
+    def _record_ai_usage(
+        self, imp: dict[str, Any], ai_usage: AINormalizationResult
+    ) -> None:
+        try:
+            ai_usage_repository.record(
+                {
+                    "biometric_import_id": imp["id"],
+                    "file_name": imp["file_name"],
+                    "provider": ai_usage.provider or "openai",
+                    "model_name": ai_usage.model or "",
+                    "input_tokens": ai_usage.input_tokens,
+                    "output_tokens": ai_usage.output_tokens,
+                    "total_tokens": ai_usage.total_tokens,
+                    "estimated_cost_usd": str(ai_usage.estimated_cost_usd),
+                }
+            )
+        except OracleRepositoryError:
+            pass
 
     def _matches_filters(
         self,
@@ -264,11 +320,23 @@ class BiometricImportService:
             ).startswith(prefix)
         return True
 
-    def _parse_input_file(self, file_name: str, content: bytes) -> list[dict[str, Any]]:
+    def _parse_input_file(
+        self, file_name: str, content: bytes
+    ) -> tuple[list[dict[str, Any]], AINormalizationResult | None]:
         text = self._decode_content(content)
         if file_name.lower().endswith((".bat", ".cmd")):
             text = self._extract_csv_from_batch(text)
-        return self._parse_csv_text(text)
+        try:
+            return self._parse_csv_text(text), None
+        except BiometricImportError:
+            normalized_result = ai_biometric_normalizer_service.normalize_to_csv(text)
+            if not normalized_result:
+                raise
+            if isinstance(normalized_result, str):
+                normalized_result = AINormalizationResult(
+                    csv_text=normalized_result, source="openai"
+                )
+            return self._parse_csv_text(normalized_result.csv_text), normalized_result
 
     def _decode_content(self, content: bytes) -> str:
         for encoding in ("utf-8-sig", "cp1252", "latin-1"):
@@ -292,7 +360,7 @@ class BiometricImportService:
         return "\n".join(rows)
 
     def _parse_csv_text(self, text: str) -> list[dict[str, Any]]:
-        reader = csv.DictReader(StringIO(text))
+        reader = csv.DictReader(StringIO(text), delimiter=self._detect_delimiter(text))
         field_map = self._field_map(reader.fieldnames or [])
         required_fields = {"dni", "marked_at", "mark_type"}
         if not required_fields.issubset(set(field_map.values())):
@@ -330,19 +398,39 @@ class BiometricImportService:
             "dni": "dni",
             "documento": "dni",
             "document_number": "dni",
+            "document": "dni",
+            "doc": "dni",
+            "cedula": "dni",
+            "employee_id": "dni",
+            "user_id": "dni",
+            "pin": "dni",
             "last_names": "last_names",
             "apellidos": "last_names",
             "apellido": "last_names",
+            "surname": "last_names",
+            "last_name": "last_names",
             "first_names": "first_names",
             "nombres": "first_names",
             "nombre": "first_names",
+            "name": "first_names",
+            "first_name": "first_names",
             "marked_at": "marked_at",
             "fecha_hora": "marked_at",
+            "fecha hora": "marked_at",
+            "fecha/hora": "marked_at",
             "fecha": "marked_at",
             "datetime": "marked_at",
+            "date_time": "marked_at",
+            "timestamp": "marked_at",
+            "punch_time": "marked_at",
+            "check_time": "marked_at",
             "mark_type": "mark_type",
             "tipo_marca": "mark_type",
+            "tipo marca": "mark_type",
             "tipo": "mark_type",
+            "event": "mark_type",
+            "direction": "mark_type",
+            "in_out": "mark_type",
         }
         return {
             field_name: aliases.get(field_name.strip().lower(), field_name)
@@ -359,8 +447,30 @@ class BiometricImportService:
 
     def _normalized_mark_type(self, value: str) -> str:
         normalized = value.strip().lower()
-        aliases = {"entrada": "entry", "ingreso": "entry", "salida": "exit"}
+        aliases = {
+            "0": "entry",
+            "1": "exit",
+            "e": "entry",
+            "s": "exit",
+            "in": "entry",
+            "out": "exit",
+            "entrada": "entry",
+            "ingreso": "entry",
+            "check-in": "entry",
+            "checkin": "entry",
+            "salida": "exit",
+            "egreso": "exit",
+            "check-out": "exit",
+            "checkout": "exit",
+        }
         return aliases.get(normalized, normalized)
+
+    def _detect_delimiter(self, text: str) -> str:
+        sample = text[:4096]
+        try:
+            return csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+        except csv.Error:
+            return ","
 
     def _apply_match(self, row: dict[str, Any]) -> None:
         staff_member = staff_member_service.get_by_dni(row["dni"])
