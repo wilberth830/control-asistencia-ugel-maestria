@@ -387,7 +387,7 @@ select {
 }
 
 .page-header {
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 
 .page-title {
@@ -410,9 +410,9 @@ select {
   box-shadow: var(--shadow);
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
-  margin-bottom: 18px;
-  padding: 18px 20px;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
 }
 
 .filters.vertical {
@@ -427,14 +427,14 @@ select {
 
 .filters .form-field {
   margin-bottom: 0;
-  max-width: 190px;
-  min-width: 140px;
+  max-width: 150px;
+  min-width: 118px;
 }
 
 .filters .form-field.grow {
   flex: 1;
-  max-width: 520px;
-  min-width: 280px;
+  max-width: 420px;
+  min-width: 220px;
 }
 
 .filter-actions {
@@ -766,26 +766,26 @@ tbody tr:last-child td {
 }
 
 .attendance-month-wrap {
-  max-height: 68vh;
+  max-height: calc(100vh - 285px);
   overflow: auto;
 }
 
 .attendance-month-table {
   border-collapse: separate;
   border-spacing: 0;
-  min-width: 980px;
+  min-width: 860px;
 }
 
 .attendance-month-table th,
 .attendance-month-table td {
-  padding: 6px;
+  padding: 4px;
   text-align: center;
 }
 
 .attendance-month-table .sticky-name {
   background: var(--surface);
   left: 0;
-  min-width: 220px;
+  min-width: 190px;
   position: sticky;
   text-align: left;
   z-index: 2;
@@ -806,10 +806,10 @@ tbody tr:last-child td {
   border: 1px solid transparent;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  height: 26px;
-  min-width: 26px;
+  height: 22px;
+  min-width: 22px;
 }
 
 .day-cell.selected {
@@ -1066,9 +1066,8 @@ tbody tr:last-child td {
 
 .attendance-layout {
   display: grid;
-  gap: 14px;
-  grid-template-columns: minmax(0, 1fr) 240px;
-  min-height: 68vh;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 220px;
   width: 100%;
 }
 
@@ -1078,24 +1077,24 @@ tbody tr:last-child td {
 }
 
 .attendance-panel {
-  min-width: 240px;
+  min-width: 220px;
 }
 
 .attendance-grid .card-header,
 .attendance-panel .card-header {
-  font-size: 15px;
-  min-height: 46px;
-  padding: 14px 18px;
+  font-size: 14px;
+  min-height: 38px;
+  padding: 9px 12px;
 }
 
 .attendance-grid,
 .attendance-panel {
-  min-height: 68vh;
+  min-height: 0;
 }
 
 .panel-stack {
   display: grid;
-  gap: 16px;
+  gap: 10px;
 }
 
 .edit-summary {
@@ -1103,9 +1102,9 @@ tbody tr:last-child td {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   display: grid;
-  gap: 10px;
-  min-height: 112px;
-  padding: 14px;
+  gap: 8px;
+  min-height: 0;
+  padding: 10px;
 }
 
 .edit-summary span {
@@ -1120,7 +1119,7 @@ tbody tr:last-child td {
 .edit-summary strong {
   color: var(--text);
   display: block;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.25;
   overflow-wrap: anywhere;
 }

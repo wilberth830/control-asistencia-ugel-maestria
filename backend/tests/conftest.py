@@ -59,5 +59,7 @@ def fake_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRedis:
 
     client = FakeRedis()
     store = session_store_module.session_store
+    monkeypatch.setattr(store, "USE_REDIS", True)
     monkeypatch.setattr(store, "_client", client)
+    monkeypatch.setattr(store, "_redis_unavailable_until", 0.0)
     return client

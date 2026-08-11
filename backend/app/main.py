@@ -1,5 +1,7 @@
 """CHIQUISTRUKIS API — TEC-D01/D04 entrypoint. Redis: infra/redis (aparte)."""
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -13,8 +15,16 @@ from app.api import (
     reports,
     staff_members,
 )
+from app.repositories.oracle import warm_oracle_pool
 
-app = FastAPI(title="CHIQUISTRUKIS API", version="0.2.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    warm_oracle_pool()
+    yield
+
+
+app = FastAPI(title="CHIQUISTRUKIS API", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

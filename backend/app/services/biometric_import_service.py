@@ -124,11 +124,17 @@ class BiometricImportService:
         imp = self._find(import_id)
         if imp["status"] != "draft":
             raise BiometricImportError("conflict_not_draft")
+        registered_dnis: set[str] = set()
         for row in imp["rows"]:
             if row.get("skipped"):
                 continue
-            if row.get("match") == "new" and not row.get("staff_member_id"):
+            if (
+                row.get("match") == "new"
+                and not row.get("staff_member_id")
+                and row["dni"] not in registered_dnis
+            ):
                 self._register_new_staff(row)
+                registered_dnis.add(row["dni"])
         self._apply_matches(imp["rows"])
         for row in imp["rows"]:
             if row.get("match") == "matched":

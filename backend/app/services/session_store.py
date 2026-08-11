@@ -19,19 +19,38 @@ class SessionStoreUnavailable(RuntimeError):
 
 
 class SessionStore:
+    USE_REDIS = False
+    REDIS_RETRY_SECONDS = 30
+    REDIS_SOCKET_TIMEOUT_SECONDS = 0.2
+
     def __init__(self) -> None:
         self._client = None
+        self._redis_unavailable_until = 0.0
         self._memory: dict[str, tuple[float, str]] = {}
 
     def _redis(self):
+        if not self.USE_REDIS:
+            raise SessionStoreUnavailable("Redis session service is disabled")
         if redis is None:
             raise SessionStoreUnavailable("Redis client library is not installed")
+        now = time.time()
+        if self._client is None and now < self._redis_unavailable_until:
+            raise SessionStoreUnavailable("Redis session service is unavailable")
         if self._client is None:
             try:
-                self._client = redis.from_url(settings.redis_url, decode_responses=True)
+                self._client = redis.from_url(
+                    settings.redis_url,
+                    decode_responses=True,
+                    socket_connect_timeout=self.REDIS_SOCKET_TIMEOUT_SECONDS,
+                    socket_timeout=self.REDIS_SOCKET_TIMEOUT_SECONDS,
+                    retry_on_timeout=False,
+                )
                 self._client.ping()
             except Exception as exc:
                 self._client = None
+                self._redis_unavailable_until = (
+                    time.time() + self.REDIS_RETRY_SECONDS
+                )
                 raise SessionStoreUnavailable(
                     "Redis session service is unavailable"
                 ) from exc
@@ -39,9 +58,11 @@ class SessionStore:
             self._client.ping()
         except Exception as exc:
             self._client = None
+            self._redis_unavailable_until = time.time() + self.REDIS_RETRY_SECONDS
             raise SessionStoreUnavailable(
                 "Redis session service is unavailable"
             ) from exc
+        self._redis_unavailable_until = 0.0
         return self._client
 
     def _memory_save(self, token: str, raw: str, ttl_seconds: int) -> None:

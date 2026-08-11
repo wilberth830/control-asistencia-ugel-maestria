@@ -20,6 +20,12 @@ SPANISH_CSV_CONTENT = (
     "45678912,Quispe Mamani,Maria Elena,2026-06-16 13:02:41,salida\n"
 )
 
+DUPLICATE_NEW_DNI_CSV = (
+    "dni,last_names,first_names,marked_at,mark_type\n"
+    "99990000,Nuevo Repetido,Carga,2026-07-01 07:42:00,entry\n"
+    "99990000,Nuevo Repetido,Carga,2026-07-01 13:05:00,exit\n"
+)
+
 BAT_CONTENT = rb"""
 @echo off
 > "%OUTFILE%" echo dni,apellidos,nombres,fecha_hora,tipo_marca
@@ -127,6 +133,36 @@ def test_confirm_auto_registers_new_rows(
     assert payload["status"] == "confirmed"
     assert payload["ok_rows"] == 2
     assert payload["rows"][1]["match"] == "matched"
+
+
+def test_confirm_registers_duplicate_new_dni_once(
+    auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/biometric-imports",
+        files={"file": ("duplicate.csv", DUPLICATE_NEW_DNI_CSV, "text/csv")},
+        headers=auth_headers,
+    )
+    import_id = response.json()["id"]
+    calls = []
+    original_register = biometric_import_service._register_new_staff
+
+    def wrapped_register(row):
+        calls.append(row["dni"])
+        return original_register(row)
+
+    monkeypatch.setattr(
+        biometric_import_service, "_register_new_staff", wrapped_register
+    )
+
+    confirm_response = client.post(
+        f"/api/v1/biometric-imports/{import_id}/confirmation",
+        headers=auth_headers,
+    )
+
+    assert confirm_response.status_code == 200
+    assert calls == ["99990000"]
 
 
 def test_confirmed_import_can_be_filtered_from_attendance(

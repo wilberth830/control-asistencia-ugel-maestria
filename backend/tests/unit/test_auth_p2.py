@@ -96,6 +96,7 @@ def test_redis_unavailable_returns_503(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     store = session_store_module.session_store
     monkeypatch.setattr(store, "_client", None)
+    monkeypatch.setattr(store, "USE_REDIS", True)
     monkeypatch.setattr(session_store_module, "redis", None)
     monkeypatch.setattr(
         session_store_module.settings, "app_allow_memory_session", False
@@ -108,6 +109,50 @@ def test_redis_unavailable_returns_503(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Session service unavailable"}
+
+
+def test_memory_session_does_not_retry_redis_on_every_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = session_store_module.session_store
+    calls = {"count": 0}
+
+    class BrokenRedis:
+        @staticmethod
+        def from_url(*args, **kwargs):
+            calls["count"] += 1
+            raise RuntimeError("redis down")
+
+    monkeypatch.setattr(store, "_client", None)
+    monkeypatch.setattr(store, "_redis_unavailable_until", 0.0)
+    monkeypatch.setattr(session_store_module, "redis", BrokenRedis)
+    monkeypatch.setattr(store, "USE_REDIS", True)
+    monkeypatch.setattr(session_store_module.settings, "app_allow_memory_session", True)
+    monkeypatch.setattr(store, "REDIS_RETRY_SECONDS", 30)
+
+    store.save("token-1", {"user_id": 1}, 60)
+    assert store.get("token-1") == {"user_id": 1}
+    assert store.get("token-1") == {"user_id": 1}
+    assert calls["count"] == 1
+
+
+def test_memory_session_skips_redis_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = session_store_module.session_store
+
+    class UnexpectedRedis:
+        @staticmethod
+        def from_url(*args, **kwargs):
+            raise AssertionError("Redis should not be used")
+
+    monkeypatch.setattr(store, "_client", None)
+    monkeypatch.setattr(session_store_module, "redis", UnexpectedRedis)
+    monkeypatch.setattr(store, "USE_REDIS", False)
+    monkeypatch.setattr(session_store_module.settings, "app_allow_memory_session", True)
+
+    store.save("token-disabled", {"user_id": 1}, 60)
+    assert store.get("token-disabled") == {"user_id": 1}
 
 
 def test_oracle_unavailable_returns_503(monkeypatch: pytest.MonkeyPatch) -> None:

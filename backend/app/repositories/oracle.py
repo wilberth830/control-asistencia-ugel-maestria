@@ -68,6 +68,17 @@ def oracle_connection() -> Iterator[oracledb.Connection]:
         connection.close()
 
 
+def warm_oracle_pool() -> bool:
+    try:
+        with oracle_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1 FROM dual")
+                cursor.fetchone()
+        return True
+    except OracleRepositoryError:
+        return False
+
+
 def oracle_date(value: Any) -> str | None:
     if value is None:
         return None
