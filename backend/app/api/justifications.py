@@ -1,14 +1,21 @@
 """TEC-D07 — justification routes."""
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.api.deps import require_token
+from app.core.config import settings
 from app.services.audit_service import audit_service
 from app.services.justification_service import (
     JustificationNotFoundError,
     JustificationValidationError,
     justification_service,
+)
+from app.services.support_file_service import (
+    SupportFileNotFoundError,
+    SupportFileValidationError,
+    support_file_service,
 )
 
 router = APIRouter(prefix="/api/v1/justifications", tags=["justifications"])
@@ -44,9 +51,17 @@ async def create_justification(
     support_file: UploadFile | None = File(None),
     session: dict = Depends(require_token),
 ):
-    support_file_path = (
-        f"support_files/{support_file.filename}" if support_file else None
-    )
+    support_file_path = None
+    if support_file:
+        try:
+            content = await support_file.read(settings.support_file_max_bytes + 1)
+            support_file_path = support_file_service.save(
+                support_file.filename or "", support_file.content_type, content
+            )
+        except SupportFileValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            await support_file.close()
     data = {
         "staff_member_id": staff_member_id,
         "start_date": start_date,
@@ -60,7 +75,11 @@ async def create_justification(
     try:
         item = justification_service.create(data)
     except JustificationValidationError as exc:
-        raise HTTPException(status_code=400, detail="Invalid justification") from exc
+        support_file_service.delete(support_file_path)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:
+        support_file_service.delete(support_file_path)
+        raise
     audit_service.record(
         user_id=session["user_id"],
         entity_name="justification",
@@ -69,6 +88,26 @@ async def create_justification(
         new_value=item,
     )
     return item
+
+
+@router.get("/{id}/support")
+def download_support_file(id: int, session: dict = Depends(require_token)):
+    try:
+        item = justification_service.get(id)
+    except JustificationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Justification not found") from exc
+
+    stored_path = item.get("support_file_path")
+    if not stored_path:
+        raise HTTPException(status_code=404, detail="Support file not found")
+    try:
+        file_path = support_file_service.resolve(stored_path)
+    except SupportFileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Support file not found") from exc
+    return FileResponse(
+        file_path,
+        filename=support_file_service.original_name(stored_path),
+    )
 
 
 @router.put("/{id}")
@@ -102,8 +141,11 @@ class CancelBody(BaseModel):
 def cancel_justification(
     id: int, body: CancelBody, session: dict = Depends(require_token)
 ):
+    reason = body.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Cancellation reason is required")
     try:
-        item = justification_service.cancel(id, body.reason)
+        item = justification_service.cancel(id, reason)
     except JustificationNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Justification not found") from exc
     audit_service.record(
@@ -111,6 +153,6 @@ def cancel_justification(
         entity_name="justification",
         entity_id=id,
         action_name="cancel",
-        new_value={"reason": body.reason},
+        new_value={"reason": reason},
     )
     return item

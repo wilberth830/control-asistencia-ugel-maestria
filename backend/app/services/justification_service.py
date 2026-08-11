@@ -106,6 +106,15 @@ class JustificationService:
             rows = [row for row in rows if row.get("status") == status]
         return [deepcopy(row) for row in rows]
 
+    def get(self, justification_id: int) -> dict[str, Any]:
+        try:
+            item = justification_repository.get(justification_id)
+            if item is not None:
+                return item
+        except OracleRepositoryError:
+            pass
+        return deepcopy(self._find(justification_id))
+
     def cancel(self, justification_id: int, reason: str) -> dict[str, Any]:
         try:
             item = justification_repository.cancel(justification_id)
@@ -141,13 +150,22 @@ class JustificationService:
         with_pay = data.get("with_pay", "Y")
         if with_pay not in {"Y", "N"}:
             raise JustificationValidationError("invalid_with_pay")
+        staff_member_id = data.get("staff_member_id")
+        if not isinstance(staff_member_id, int) or staff_member_id <= 0:
+            raise JustificationValidationError("invalid_staff_member")
+        norm_code = str(data.get("norm_code", "")).strip().upper()
+        if not norm_code or len(norm_code) > 10:
+            raise JustificationValidationError("invalid_norm_code")
+        reason = data.get("reason")
+        if isinstance(reason, str):
+            reason = reason.strip() or None
         return {
-            "staff_member_id": data["staff_member_id"],
+            "staff_member_id": staff_member_id,
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
-            "norm_code": data["norm_code"],
+            "norm_code": norm_code,
             "with_pay": with_pay,
-            "reason": data.get("reason"),
+            "reason": reason,
             "support_file_path": data.get("support_file_path"),
             "registered_by_id": data.get("registered_by_id"),
         }

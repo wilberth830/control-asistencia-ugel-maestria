@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     app_use_demo_store: bool = True
     app_allow_memory_session: bool = True
 
+    support_files_dir: str = "storage/support_files"
+    support_file_max_bytes: int = 5 * 1024 * 1024
+
     ai_enabled: bool = False
     ai_provider: str = ""
     ai_model: str = ""

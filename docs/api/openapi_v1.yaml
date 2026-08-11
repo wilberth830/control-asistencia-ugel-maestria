@@ -396,6 +396,17 @@ paths:
           schema: { type: integer }
       responses:
         '200': { description: Updated }
+  /api/v1/justifications/{id}/support:
+    get:
+      operationId: downloadJustificationSupport
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: Archivo de sustento }
+        '404': { description: Sustento no encontrado }
   /api/v1/justifications/{id}/cancellation:
     post:
       operationId: cancelJustification

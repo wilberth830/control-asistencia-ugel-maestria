@@ -123,6 +123,29 @@ type AttendanceDay = {
   justification_id: number | null;
 };
 
+type Justification = {
+  id: number;
+  staff_member_id: number;
+  start_date: string;
+  end_date: string;
+  norm_code: string;
+  with_pay: "Y" | "N";
+  reason: string | null;
+  support_file_path: string | null;
+  registered_at?: string | null;
+  status: "active" | "cancelled";
+  cancel_reason?: string | null;
+};
+
+const justificationNorms = [
+  { code: "LG", label: "LG - Licencia con Goce" },
+  { code: "LS", label: "LS - Licencia sin Goce" },
+  { code: "P", label: "P - Permiso sin Goce" },
+  { code: "J", label: "J - Inasistencia Justificada" },
+  { code: "H", label: "H - Huelga / Paro" },
+  { code: "F", label: "F - Feriado" },
+] as const;
+
 type Annex03Report = {
   institution: {
     ugel: string;
@@ -1771,33 +1794,427 @@ function AttendancePage() {
   );
 }
 
+function formatJustificationPeriod(startDate: string, endDate: string) {
+  const format = (value: string) => {
+    const [year, month, day] = value.split("-");
+    return `${day}/${month}/${year}`;
+  };
+  return startDate === endDate
+    ? format(startDate)
+    : `${format(startDate)} al ${format(endDate)}`;
+}
+
 function JustificationsPage() {
+  const today = new Date();
+  const localDate = new Date(today.getTime() - today.getTimezoneOffset() * 60_000)
+    .toISOString()
+    .slice(0, 10);
+  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
+  const [justifications, setJustifications] = useState<Justification[]>([]);
+  const [staffMemberId, setStaffMemberId] = useState(0);
+  const [startDate, setStartDate] = useState(localDate);
+  const [endDate, setEndDate] = useState(localDate);
+  const [normCode, setNormCode] = useState("LG");
+  const [withPay, setWithPay] = useState<"Y" | "N">("Y");
+  const [reason, setReason] = useState("");
+  const [supportFile, setSupportFile] = useState<File | null>(null);
+  const [fileInputKey, setFileInputKey] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
+  const [itemToCancel, setItemToCancel] = useState<Justification | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      loadStaffMembers(),
+      apiClient.get<Justification[]>("/api/v1/justifications"),
+    ])
+      .then(([staff, response]) => {
+        if (!active) return;
+        const activeStaff = staff.filter((item) => item.is_active === "Y");
+        setStaffMembers(staff);
+        setStaffMemberId((current) => current || activeStaff[0]?.id || 0);
+        setJustifications(response.data);
+      })
+      .catch(() => {
+        if (active) setError("No se pudieron cargar las justificaciones.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const activeStaffMembers = staffMembers.filter((item) => item.is_active === "Y");
+  const staffById = new Map(staffMembers.map((item) => [item.id, item]));
+
+  const changeNorm = (event: ChangeEvent<HTMLSelectElement>) => {
+    const code = event.target.value;
+    setNormCode(code);
+    if (code === "LG") setWithPay("Y");
+    if (code === "LS" || code === "P") setWithPay("N");
+  };
+
+  const changeSupportFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    setError("");
+    if (file && file.size > 5 * 1024 * 1024) {
+      setSupportFile(null);
+      setFileInputKey((current) => current + 1);
+      setError("El sustento no puede superar los 5 MB.");
+      return;
+    }
+    setSupportFile(file);
+  };
+
+  const submitJustification = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    if (!staffMemberId) {
+      setError("Selecciona al personal docente o auxiliar.");
+      return;
+    }
+    if (endDate < startDate) {
+      setError("La fecha fin no puede ser anterior a la fecha inicio.");
+      return;
+    }
+    if (!reason.trim()) {
+      setError("Ingresa el motivo o detalle de la justificación.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("staff_member_id", String(staffMemberId));
+    formData.append("start_date", startDate);
+    formData.append("end_date", endDate);
+    formData.append("norm_code", normCode);
+    formData.append("with_pay", withPay);
+    formData.append("reason", reason.trim());
+    if (supportFile) formData.append("support_file", supportFile);
+
+    setSubmitting(true);
+    try {
+      const response = await apiClient.post<Justification>(
+        "/api/v1/justifications",
+        formData,
+      );
+      setJustifications((current) => [
+        response.data,
+        ...current.filter((item) => item.id !== response.data.id),
+      ]);
+      setReason("");
+      setSupportFile(null);
+      setFileInputKey((current) => current + 1);
+      setMessage("La justificación se registró correctamente.");
+    } catch {
+      setError(
+        "No se pudo registrar la justificación. Revisa los datos y el sustento.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const downloadSupport = async (item: Justification) => {
+    setDownloadingId(item.id);
+    setError("");
+    try {
+      const response = await apiClient.get(
+        `/api/v1/justifications/${item.id}/support`,
+        { responseType: "blob" },
+      );
+      const storedName = item.support_file_path?.split(/[\\/]/).pop() ?? "sustento";
+      const downloadName = storedName.includes("_")
+        ? storedName.slice(storedName.indexOf("_") + 1)
+        : storedName;
+      const url = URL.createObjectURL(response.data as Blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = downloadName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+    } catch {
+      setError("No se pudo descargar el sustento solicitado.");
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  const cancelJustification = async () => {
+    if (!itemToCancel || !cancelReason.trim()) {
+      setError("Indica el motivo de la anulación.");
+      return;
+    }
+    setCancelling(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await apiClient.post<Justification>(
+        `/api/v1/justifications/${itemToCancel.id}/cancellation`,
+        { reason: cancelReason.trim() },
+      );
+      setJustifications((current) =>
+        current.map((item) => (item.id === response.data.id ? response.data : item)),
+      );
+      setItemToCancel(null);
+      setCancelReason("");
+      setMessage("La justificación fue anulada correctamente.");
+    } catch {
+      setError("No se pudo anular la justificación.");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   return (
     <>
       <PageHeader
-        title="Justificaciones"
-        description="Licencias, permisos y archivos de sustento"
+        title="Justificaciones y Permisos"
+        description="Gestión de licencias con/sin goce y adjunto de sustentos"
       />
       <section className="card">
-        <div className="card-header">Registro</div>
-        <div className="card-body form-grid">
-          <label className="form-field">
-            <span>DNI</span>
-            <input placeholder="45678912" />
-          </label>
-          <label className="form-field">
-            <span>Norma</span>
-            <input placeholder="LIC" />
-          </label>
-          <label className="form-field wide">
-            <span>Motivo</span>
-            <input placeholder="Licencia aprobada" />
-          </label>
-          <button className="btn btn-primary" type="button">
-            Registrar
-          </button>
+        <div className="card-header">Nueva Justificación</div>
+        <form className="card-body justification-form" onSubmit={submitJustification}>
+          {error && <div className="alert-danger justification-alert">{error}</div>}
+          {message && <div className="alert-success justification-alert">{message}</div>}
+          <div className="justification-form-grid">
+            <label className="form-field">
+              <span>Personal Docente / Auxiliar</span>
+              <select
+                disabled={loading || activeStaffMembers.length === 0}
+                onChange={(event) => setStaffMemberId(Number(event.target.value))}
+                required
+                value={staffMemberId}
+              >
+                {loading && <option value={0}>Cargando...</option>}
+                {!loading && activeStaffMembers.length === 0 && (
+                  <option value={0}>No hay personal activo</option>
+                )}
+                {activeStaffMembers.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.dni} - {item.last_names}, {item.first_names}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Fecha Inicio</span>
+              <input
+                max={endDate}
+                onChange={(event) => setStartDate(event.target.value)}
+                required
+                type="date"
+                value={startDate}
+              />
+            </label>
+            <label className="form-field">
+              <span>Fecha Fin</span>
+              <input
+                min={startDate}
+                onChange={(event) => setEndDate(event.target.value)}
+                required
+                type="date"
+                value={endDate}
+              />
+            </label>
+            <label className="form-field">
+              <span>Código Norma RSG N.° 326</span>
+              <select onChange={changeNorm} value={normCode}>
+                {justificationNorms.map((item) => (
+                  <option key={item.code} value={item.code}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Con Goce de Remuneración</span>
+              <select
+                onChange={(event) => setWithPay(event.target.value as "Y" | "N")}
+                value={withPay}
+              >
+                <option value="Y">Sí (Con Goce)</option>
+                <option value="N">No (Sin Goce)</option>
+              </select>
+            </label>
+            <label className="form-field full-width">
+              <span>Motivo / Detalle</span>
+              <input
+                maxLength={500}
+                onChange={(event) => setReason(event.target.value)}
+                placeholder="Descripción del motivo de la licencia..."
+                required
+                value={reason}
+              />
+            </label>
+            <label className="form-field full-width">
+              <span>Sustento Adjunto (PDF/Imagen, máximo 5 MB)</span>
+              <input
+                accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
+                key={fileInputKey}
+                onChange={changeSupportFile}
+                type="file"
+              />
+              {supportFile && (
+                <small className="file-caption">Seleccionado: {supportFile.name}</small>
+              )}
+            </label>
+          </div>
+          <div className="justification-actions">
+            <button
+              className="btn btn-primary"
+              disabled={loading || submitting || activeStaffMembers.length === 0}
+              type="submit"
+            >
+              {submitting && <span className="btn-spinner" />}
+              {submitting ? "Registrando" : "Registrar Justificación"}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="card">
+        <div className="card-header">
+          <span>Justificaciones registradas</span>
+          <span className="subtle-inline">{justifications.length} registros</span>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Personal</th>
+                <th>Periodo</th>
+                <th>Norma</th>
+                <th>Goce</th>
+                <th>Motivo</th>
+                <th>Sustento</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && (
+                <tr>
+                  <td className="empty-cell" colSpan={8}>Cargando...</td>
+                </tr>
+              )}
+              {!loading && justifications.length === 0 && (
+                <tr>
+                  <td className="empty-cell" colSpan={8}>
+                    No hay justificaciones registradas.
+                  </td>
+                </tr>
+              )}
+              {!loading &&
+                justifications.map((item) => {
+                  const staff = staffById.get(item.staff_member_id);
+                  const norm = justificationNorms.find(
+                    (option) => option.code === item.norm_code,
+                  );
+                  return (
+                    <tr key={item.id}>
+                      <td>
+                        <strong>{staff ? `${staff.last_names}, ${staff.first_names}` : `Personal #${item.staff_member_id}`}</strong>
+                        {staff && <small className="table-subtext">DNI {staff.dni}</small>}
+                      </td>
+                      <td>{formatJustificationPeriod(item.start_date, item.end_date)}</td>
+                      <td title={norm?.label}>{item.norm_code}</td>
+                      <td>{item.with_pay === "Y" ? "Sí" : "No"}</td>
+                      <td className="justification-reason">{item.reason || "—"}</td>
+                      <td>
+                        {item.support_file_path ? (
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            disabled={downloadingId === item.id}
+                            onClick={() => downloadSupport(item)}
+                            type="button"
+                          >
+                            {downloadingId === item.id ? "Descargando" : "Ver sustento"}
+                          </button>
+                        ) : (
+                          <span className="subtle-inline">Sin adjunto</span>
+                        )}
+                      </td>
+                      <td>
+                        <span
+                          className={`badge ${item.status === "active" ? "badge-success" : "badge-muted"}`}
+                        >
+                          {item.status === "active" ? "Activa" : "Anulada"}
+                        </span>
+                      </td>
+                      <td>
+                        {item.status === "active" && (
+                          <button
+                            className="btn btn-danger-outline btn-sm"
+                            onClick={() => {
+                              setItemToCancel(item);
+                              setCancelReason("");
+                              setError("");
+                            }}
+                            type="button"
+                          >
+                            Anular
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
         </div>
       </section>
+
+      {itemToCancel && (
+        <div className="modal-backdrop confirmation-backdrop" role="presentation">
+          <div aria-modal="true" className="confirmation-card" role="dialog">
+            <div className="confirmation-icon">!</div>
+            <h2>Anular justificación</h2>
+            <p>
+              Esta acción revertirá la justificación aplicada a la asistencia del
+              periodo seleccionado.
+            </p>
+            <label className="form-field cancellation-reason">
+              <span>Motivo de anulación</span>
+              <input
+                autoFocus
+                maxLength={250}
+                onChange={(event) => setCancelReason(event.target.value)}
+                placeholder="Indica por qué se anula..."
+                value={cancelReason}
+              />
+            </label>
+            <div className="confirmation-actions">
+              <button
+                className="btn btn-secondary"
+                disabled={cancelling}
+                onClick={() => setItemToCancel(null)}
+                type="button"
+              >
+                Volver
+              </button>
+              <button
+                className="btn btn-danger-outline"
+                disabled={cancelling || !cancelReason.trim()}
+                onClick={cancelJustification}
+                type="button"
+              >
+                {cancelling ? "Anulando" : "Confirmar anulación"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

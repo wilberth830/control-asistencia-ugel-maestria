@@ -1180,6 +1180,56 @@ tbody tr:last-child td {
   grid-column: span 1;
 }
 
+.justification-form {
+  padding-bottom: 16px;
+}
+
+.justification-alert {
+  margin-bottom: 14px;
+}
+
+.justification-form-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.justification-form-grid .form-field {
+  margin-bottom: 0;
+}
+
+.justification-form-grid .full-width {
+  grid-column: 1 / -1;
+}
+
+.justification-form-grid input[type="file"] {
+  height: auto;
+  min-height: 32px;
+  padding: 4px 8px;
+}
+
+.file-caption,
+.table-subtext {
+  color: var(--text-muted);
+  display: block;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.justification-actions {
+  margin-top: 16px;
+}
+
+.justification-reason {
+  max-width: 300px;
+  overflow-wrap: anywhere;
+}
+
+.cancellation-reason {
+  margin-bottom: 20px;
+  text-align: left;
+}
+
 .report-layout {
   display: grid;
   gap: 16px;
@@ -1290,6 +1340,7 @@ tbody tr:last-child td {
   .report-layout,
   .report-toolbar-content,
   .form-grid,
+  .justification-form-grid,
   .wizard-steps {
     grid-template-columns: 1fr;
   }
