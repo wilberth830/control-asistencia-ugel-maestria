@@ -601,6 +601,66 @@ tbody tr:last-child td {
   background: var(--primary-soft);
 }
 
+.attendance-month-wrap {
+  max-height: 520px;
+}
+
+.attendance-month-table {
+  min-width: 980px;
+}
+
+.attendance-month-table th,
+.attendance-month-table td {
+  padding: 6px;
+  text-align: center;
+}
+
+.attendance-month-table .sticky-name {
+  background: var(--surface);
+  left: 0;
+  min-width: 220px;
+  position: sticky;
+  text-align: left;
+  z-index: 1;
+}
+
+.day-cell {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  height: 26px;
+  min-width: 26px;
+}
+
+.day-cell.present {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.day-cell.late {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.day-cell.absent {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.day-cell.justified,
+.day-cell.leave,
+.day-cell.permission {
+  background: var(--info-bg);
+  color: var(--info);
+}
+
+.day-empty {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .dropzone {
   background: var(--primary-soft);
   border: 1.5px dashed #93c5fd;

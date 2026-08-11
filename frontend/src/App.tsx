@@ -896,6 +896,10 @@ function AttendancePage() {
   const initialYear = Number(query.get("year") || 2026);
   const [month, setMonth] = useState(initialMonth);
   const [year, setYear] = useState(initialYear);
+  const [selectedImportId, setSelectedImportId] = useState(
+    importId ? Number(importId) : 0,
+  );
+  const [monthImports, setMonthImports] = useState<BiometricImport[]>([]);
   const [attendanceRows, setAttendanceRows] = useState<AttendanceDay[]>([]);
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
   const [selectedDay, setSelectedDay] = useState<AttendanceDay | null>(null);
@@ -911,7 +915,11 @@ function AttendancePage() {
     try {
       const [attendanceResponse, staffResponse] = await Promise.all([
         apiClient.get<AttendanceDay[]>("/api/v1/attendance-records", {
-          params: { month, year },
+          params: {
+            month,
+            year,
+            import_id: selectedImportId || undefined,
+          },
         }),
         apiClient.get<StaffMember[]>("/api/v1/staff-members", {
           params: { is_active: "Y" },
@@ -933,16 +941,27 @@ function AttendancePage() {
     let cancelled = false;
     Promise.all([
       apiClient.get<AttendanceDay[]>("/api/v1/attendance-records", {
-        params: { month: initialMonth, year: initialYear },
+        params: {
+          month: initialMonth,
+          year: initialYear,
+          import_id: selectedImportId || undefined,
+        },
       }),
       apiClient.get<StaffMember[]>("/api/v1/staff-members", {
         params: { is_active: "Y" },
       }),
+      apiClient.get<BiometricImport[]>("/api/v1/biometric-imports", {
+        params: { month: initialMonth, year: initialYear, status: "confirmed" },
+      }),
     ])
-      .then(([attendanceResponse, staffResponse]) => {
+      .then(([attendanceResponse, staffResponse, importsResponse]) => {
         if (cancelled) return;
         setAttendanceRows(attendanceResponse.data);
         setStaffMembers(staffResponse.data);
+        setMonthImports(importsResponse.data);
+        if (!selectedImportId && importsResponse.data[0]) {
+          setSelectedImportId(importsResponse.data[0].id);
+        }
         setSelectedDay(attendanceResponse.data[0] ?? null);
         setSelectedStatus(attendanceResponse.data[0]?.status ?? "present");
         setLateMinutes(attendanceResponse.data[0]?.late_minutes ?? 0);
@@ -956,7 +975,21 @@ function AttendancePage() {
     return () => {
       cancelled = true;
     };
-  }, [initialMonth, initialYear]);
+  }, [initialMonth, initialYear, selectedImportId]);
+
+  const loadMonthImports = async (nextMonth: number, nextYear: number) => {
+    try {
+      const response = await apiClient.get<BiometricImport[]>(
+        "/api/v1/biometric-imports",
+        { params: { month: nextMonth, year: nextYear, status: "confirmed" } },
+      );
+      setMonthImports(response.data);
+      setSelectedImportId(response.data[0]?.id ?? 0);
+    } catch {
+      setMonthImports([]);
+      setSelectedImportId(0);
+    }
+  };
 
   const selectDay = (row: AttendanceDay) => {
     setSelectedDay(row);
@@ -1015,7 +1048,11 @@ function AttendancePage() {
         <label className="form-field">
           <span>Mes</span>
           <select
-            onChange={(event) => setMonth(Number(event.target.value))}
+            onChange={(event) => {
+              const nextMonth = Number(event.target.value);
+              setMonth(nextMonth);
+              loadMonthImports(nextMonth, year);
+            }}
             value={month}
           >
             <option value="7">Julio</option>
@@ -1025,8 +1062,29 @@ function AttendancePage() {
         </label>
         <label className="form-field">
           <span>Año</span>
-          <select onChange={(event) => setYear(Number(event.target.value))} value={year}>
+          <select
+            onChange={(event) => {
+              const nextYear = Number(event.target.value);
+              setYear(nextYear);
+              loadMonthImports(month, nextYear);
+            }}
+            value={year}
+          >
             <option value="2026">2026</option>
+          </select>
+        </label>
+        <label className="form-field grow">
+          <span>Archivo</span>
+          <select
+            onChange={(event) => setSelectedImportId(Number(event.target.value))}
+            value={selectedImportId}
+          >
+            <option value="0">Todos los archivos del mes</option>
+            {monthImports.map((item) => (
+              <option key={item.id} value={item.id}>
+                #{item.id} · {item.file_name}
+              </option>
+            ))}
           </select>
         </label>
         <div className="filter-actions">
@@ -1047,23 +1105,12 @@ function AttendancePage() {
           <div className="card-header">
             Asistencia cargada · {String(month).padStart(2, "0")}/{year}
           </div>
-          <SelectableDataTable
-            columns={["Personal", "DNI", "Fecha", "Estado", "Tardanza"]}
-            emptyText="Sin asistencia para el período seleccionado"
+          <AttendanceMonthGrid
+            month={month}
             onSelect={selectDay}
             rows={attendanceRows}
-            renderRow={(row) => {
-              const staff = staffById[row.staff_member_id];
-              return [
-                staff
-                  ? `${staff.last_names}, ${staff.first_names}`
-                  : `ID ${row.staff_member_id}`,
-                staff?.dni ?? "-",
-                row.attendance_date,
-                attendanceStatusText(row.status),
-                String(row.late_minutes),
-              ];
-            }}
+            staffById={staffById}
+            year={year}
           />
         </section>
         <section className="card attendance-panel">
@@ -1294,41 +1341,80 @@ function DataTable({
   );
 }
 
-function SelectableDataTable<T extends { id: number }>({
-  columns,
+function AttendanceMonthGrid({
   rows,
-  renderRow,
+  staffById,
+  month,
+  year,
   onSelect,
-  emptyText = "Sin registros",
 }: {
-  columns: string[];
-  rows: T[];
-  renderRow: (row: T) => string[];
-  onSelect: (row: T) => void;
-  emptyText?: string;
+  rows: AttendanceDay[];
+  staffById: Record<number, StaffMember>;
+  month: number;
+  year: number;
+  onSelect: (row: AttendanceDay) => void;
 }) {
+  const days = Array.from(
+    { length: new Date(year, month, 0).getDate() },
+    (_, index) => index + 1,
+  );
+  const rowsByStaff = rows.reduce<Record<number, Record<number, AttendanceDay>>>(
+    (acc, row) => {
+      const day = Number(row.attendance_date.slice(8, 10));
+      acc[row.staff_member_id] = acc[row.staff_member_id] ?? {};
+      acc[row.staff_member_id][day] = row;
+      return acc;
+    },
+    {},
+  );
+  const staffIds = Object.keys(rowsByStaff).map(Number);
+
   return (
-    <div className="table-wrap">
-      <table>
+    <div className="table-wrap attendance-month-wrap">
+      <table className="attendance-month-table">
         <thead>
           <tr>
-            {columns.map((column) => (
-              <th key={column}>{column}</th>
+            <th>Personal</th>
+            {days.map((day) => (
+              <th key={day}>{String(day).padStart(2, "0")}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {rows.length ? (
-            rows.map((row) => (
-              <tr className="clickable-row" key={row.id} onClick={() => onSelect(row)}>
-                {renderRow(row).map((cell, index) => (
-                  <td key={`${row.id}-${index}`}>{cell}</td>
-                ))}
-              </tr>
-            ))
+          {staffIds.length ? (
+            staffIds.map((staffId) => {
+              const staff = staffById[staffId];
+              return (
+                <tr key={staffId}>
+                  <td className="sticky-name">
+                    {staff
+                      ? `${staff.last_names}, ${staff.first_names}`
+                      : `ID ${staffId}`}
+                  </td>
+                  {days.map((day) => {
+                    const row = rowsByStaff[staffId]?.[day];
+                    return (
+                      <td key={day}>
+                        {row ? (
+                          <button
+                            className={`day-cell ${row.status}`}
+                            onClick={() => onSelect(row)}
+                            type="button"
+                          >
+                            {attendanceStatusShort(row.status)}
+                          </button>
+                        ) : (
+                          <span className="day-empty">-</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })
           ) : (
             <tr>
-              <td colSpan={columns.length}>{emptyText}</td>
+              <td colSpan={days.length + 1}>Sin asistencia para este archivo</td>
             </tr>
           )}
         </tbody>
@@ -1372,9 +1458,16 @@ function markTypeText(markType: string) {
   return labels[markType] ?? markType;
 }
 
-function attendanceStatusText(status: string) {
-  const label = attendanceStatuses.find((item) => item.value === status)?.label;
-  return label ?? status;
+function attendanceStatusShort(status: string) {
+  const labels: Record<string, string> = {
+    present: "A",
+    late: "T",
+    absent: "F",
+    justified: "J",
+    leave: "L",
+    permission: "P",
+  };
+  return labels[status] ?? status.slice(0, 1).toUpperCase();
 }
 
 export default App;

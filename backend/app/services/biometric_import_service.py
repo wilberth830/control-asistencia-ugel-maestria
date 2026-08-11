@@ -71,7 +71,9 @@ class BiometricImportService:
         self, file_name: str, content: bytes, user_account_id: int | None = None
     ) -> dict[str, Any]:
         rows = self._parse_input_file(file_name, content)
-        return self._create_draft(file_name, rows, user_account_id)
+        return self._create_draft(
+            self._timestamped_file_name(file_name), rows, user_account_id
+        )
 
     def get(self, import_id: int) -> dict[str, Any] | None:
         row = self._imports.get(import_id)
@@ -221,6 +223,13 @@ class BiometricImportService:
             imp["id"] = self._seq
         self._imports[imp["id"]] = imp
         return deepcopy(imp)
+
+    def _timestamped_file_name(self, file_name: str) -> str:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        if "." not in file_name:
+            return f"{file_name}_{timestamp}"
+        stem, extension = file_name.rsplit(".", 1)
+        return f"{stem}_{timestamp}.{extension}"
 
     def _parse_input_file(self, file_name: str, content: bytes) -> list[dict[str, Any]]:
         text = self._decode_content(content)

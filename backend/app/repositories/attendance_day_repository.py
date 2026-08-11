@@ -115,6 +115,31 @@ class AttendanceDayRepository:
         except oracledb.Error as exc:
             raise OracleRepositoryError("Attendance list failed") from exc
 
+    def list_by_import(self, import_id: int) -> list[dict[str, Any]]:
+        sql = """
+            SELECT
+                MIN(ad.id) AS id,
+                ad.staff_member_id,
+                ad.attendance_date,
+                MAX(ad.status) KEEP (DENSE_RANK LAST ORDER BY bm.marked_at) AS status,
+                MAX(ad.late_minutes) AS late_minutes,
+                MAX(ad.justification_id) AS justification_id
+            FROM biometric_mark bm
+            JOIN attendance_day ad
+              ON ad.staff_member_id = bm.staff_member_id
+             AND ad.attendance_date = TRUNC(bm.marked_at)
+            WHERE bm.biometric_import_id = :import_id
+            GROUP BY ad.staff_member_id, ad.attendance_date
+            ORDER BY ad.attendance_date, ad.staff_member_id
+        """
+        try:
+            with oracle_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(sql, import_id=import_id)
+                    return [self._row(row) for row in cursor.fetchall()]
+        except oracledb.Error as exc:
+            raise OracleRepositoryError("Attendance import list failed") from exc
+
     def clear_justification(self, justification_id: int) -> list[dict[str, Any]]:
         try:
             with oracle_connection() as connection:

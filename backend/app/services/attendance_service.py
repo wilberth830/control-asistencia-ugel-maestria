@@ -106,11 +106,17 @@ class AttendanceService:
         return changed
 
     def list_month(
-        self, month: int, year: int, staff_member_id: int | None = None
+        self,
+        month: int,
+        year: int,
+        staff_member_id: int | None = None,
+        import_id: int | None = None,
     ) -> list[dict[str, Any]]:
         if month < 1 or month > 12:
             raise AttendanceValidationError("invalid_month")
         try:
+            if import_id:
+                return attendance_day_repository.list_by_import(import_id)
             return attendance_day_repository.list_month(
                 month=month, year=year, staff_member_id=staff_member_id
             )

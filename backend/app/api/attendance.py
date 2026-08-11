@@ -18,10 +18,11 @@ def list_records(
     month: int,
     year: int,
     staff_member_id: int | None = None,
+    import_id: int | None = None,
     session: dict = Depends(require_token),
 ):
     try:
-        return attendance_service.list_month(month, year, staff_member_id)
+        return attendance_service.list_month(month, year, staff_member_id, import_id)
     except AttendanceValidationError as exc:
         raise HTTPException(status_code=400, detail="Invalid attendance query") from exc
 

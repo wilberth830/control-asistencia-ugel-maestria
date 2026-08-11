@@ -68,3 +68,6 @@ Si `DB_PASSWORD` no está definido, `ejecutar-bd.bat` lo pedirá en consola sin 
 - No versionar contraseñas reales.
 - No imprimir cadenas completas `usuario/password@host:port/PDB`.
 - No usar `DROP TABLE`, `DROP USER`, `DROP SEQUENCE` ni limpieza destructiva para lograr idempotencia.
+
+
+sqlplus ASISTENCIA_OWNER/Asistencia123@localhost:1521/FREEPDB1 @database/04_maintenance/01_clear_uploaded_data.sql

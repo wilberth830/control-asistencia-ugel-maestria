@@ -117,7 +117,8 @@ def test_dashboard_indicators_use_attendance_staff_and_imports(
     assert payload["active_staff_members"] == 3
     assert payload["mark_distribution"]["present"] == 1
     assert payload["mark_distribution"]["late"] == 1
-    assert payload["recent_imports"][0]["file_name"] == "marks.csv"
+    assert payload["recent_imports"][0]["file_name"].startswith("marks_")
+    assert payload["recent_imports"][0]["file_name"].endswith(".csv")
 
 
 def test_reports_reject_xlsx_in_json_step(auth_headers: dict[str, str]) -> None:
