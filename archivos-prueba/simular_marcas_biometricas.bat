@@ -64,6 +64,9 @@ echo.
 >> "%OUTFILE%" echo 99000002,Perez Soto,Juan Carlos,2026-06-16 13:00:00,salida
 
 >> "%OUTFILE%" echo 99000003,Perez Soto,Juan Carlos,2026-06-16 08:10:00,entrada
+
+>> "%OUTFILE%" echo 99000004,Perez Soto,Juan Carlos,2026-06-16 08:10:00,entrada
+
 :: Duplicado intencional — para probar inconsistencias
 >> "%OUTFILE%" echo 45678912,Quispe Mamani,Maria Elena,2026-06-16 07:55:12,entrada
 

@@ -109,7 +109,7 @@ def test_create_import_accepts_batch_generator_file(
     assert payload["rows"][1]["dni"] == "99998888"
 
 
-def test_confirm_requires_new_rows_to_be_resolved(
+def test_confirm_auto_registers_new_rows(
     auth_headers: dict[str, str],
 ) -> None:
     client = TestClient(app)
@@ -120,8 +120,11 @@ def test_confirm_requires_new_rows_to_be_resolved(
         headers=auth_headers,
     )
 
-    assert response.status_code == 400
-    assert response.json() == {"detail": "Unresolved new rows"}
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "confirmed"
+    assert payload["ok_rows"] == 2
+    assert payload["rows"][1]["match"] == "matched"
 
 
 def test_register_new_then_confirm_and_cancel(

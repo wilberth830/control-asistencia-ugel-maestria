@@ -514,7 +514,7 @@ function ImportPage() {
         }`,
       );
     } catch {
-      setError("No se pudo confirmar. Resuelve o registra las filas nuevas.");
+      setError("No se pudo confirmar la carga.");
     } finally {
       setLoading(false);
       setProcessingLabel("");
@@ -683,12 +683,7 @@ function ImportPage() {
             </button>
             <button
               className="btn btn-secondary"
-              disabled={
-                !currentImport ||
-                loading ||
-                currentImport.status !== "draft" ||
-                unresolvedRows > 0
-              }
+              disabled={!currentImport || loading || currentImport.status !== "draft"}
               onClick={confirmImport}
               type="button"
             >
@@ -868,26 +863,10 @@ function ImportRowsTable({
                         <button
                           className="btn btn-sm btn-primary"
                           disabled={rowLoadingId === row.row_id}
-                          onClick={() => onPatchRow(row, "register_new")}
-                          type="button"
-                        >
-                          Registrar nuevo
-                        </button>
-                        <button
-                          className="btn btn-sm btn-secondary"
-                          disabled={rowLoadingId === row.row_id}
                           onClick={() => onPatchRow(row, "research")}
                           type="button"
                         >
                           Rebuscar
-                        </button>
-                        <button
-                          className="btn btn-sm btn-danger-outline"
-                          disabled={rowLoadingId === row.row_id}
-                          onClick={() => onPatchRow(row, "skip")}
-                          type="button"
-                        >
-                          Omitir
                         </button>
                       </div>
                     ) : (
