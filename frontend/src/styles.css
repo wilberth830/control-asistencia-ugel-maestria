@@ -1426,6 +1426,7 @@ tbody tr:last-child td {
   }
 }
 
+
 .annex-official {
   border: 1px solid #cbd5e1;
   border-radius: 8px;
@@ -1487,4 +1488,3 @@ tbody tr:last-child td {
 .btn-block {
   width: 100%;
 }
-
