@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date, datetime
-import json
+from threading import Lock
 from typing import Any
 
 import oracledb
@@ -17,6 +18,10 @@ class OracleRepositoryError(RuntimeError):
     """Raised when Oracle cannot be used by a repository."""
 
 
+_pool: Any = None
+_pool_lock = Lock()
+
+
 def _validate_oracle_settings() -> None:
     if (
         not settings.oracle_user
@@ -26,15 +31,34 @@ def _validate_oracle_settings() -> None:
         raise OracleRepositoryError("Oracle connection settings are incomplete")
 
 
+def _oracle_pool():
+    global _pool
+
+    _validate_oracle_settings()
+    if _pool is not None:
+        return _pool
+
+    with _pool_lock:
+        if _pool is None:
+            try:
+                _pool = oracledb.create_pool(
+                    user=settings.oracle_user,
+                    password=settings.oracle_password,
+                    dsn=settings.oracle_dsn,
+                    min=1,
+                    max=5,
+                    increment=1,
+                    ping_interval=60,
+                )
+            except oracledb.Error as exc:
+                raise OracleRepositoryError("Oracle pool creation failed") from exc
+    return _pool
+
+
 @contextmanager
 def oracle_connection() -> Iterator[oracledb.Connection]:
-    _validate_oracle_settings()
     try:
-        connection = oracledb.connect(
-            user=settings.oracle_user,
-            password=settings.oracle_password,
-            dsn=settings.oracle_dsn,
-        )
+        connection = _oracle_pool().acquire()
     except oracledb.Error as exc:
         raise OracleRepositoryError("Oracle connection failed") from exc
 
