@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.api.deps import require_token
-from app.services.auth_service import auth_service
+from app.services.auth_service import AuthStoreUnavailable, auth_service
 from app.services.session_store import SessionStoreUnavailable
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -19,6 +19,10 @@ class LoginBody(BaseModel):
 def start_session(body: LoginBody):
     try:
         result = auth_service.login(body.username, body.password)
+    except AuthStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=503, detail="Authentication store unavailable"
+        ) from exc
     except SessionStoreUnavailable as exc:
         raise HTTPException(
             status_code=503, detail="Session service unavailable"

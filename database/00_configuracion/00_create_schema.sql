@@ -2,7 +2,6 @@ SET ECHO OFF
 SET VERIFY OFF
 SET FEEDBACK ON
 SET SERVEROUTPUT ON
-
 WHENEVER SQLERROR EXIT SQL.SQLCODE
 
 DEFINE PDB_NAME = '&1'
@@ -18,62 +17,91 @@ PROMPT ============================================
 ALTER SESSION SET CONTAINER = &&PDB_NAME;
 
 DECLARE
-    v_user_count NUMBER;
-    v_username VARCHAR2(128) := UPPER('&&APP_USER');
-    v_password VARCHAR2(4000) := '&&APP_PASSWORD';
-
-    PROCEDURE grant_privilege(p_privilege IN VARCHAR2) IS
-        v_count NUMBER;
-    BEGIN
-        SELECT COUNT(*)
-        INTO v_count
-        FROM dba_sys_privs
-        WHERE grantee = v_username
-          AND privilege = UPPER(p_privilege);
-
-        IF v_count = 0 THEN
-            EXECUTE IMMEDIATE 'GRANT ' || p_privilege || ' TO ' || v_username;
-            DBMS_OUTPUT.PUT_LINE('[GRANT] ' || p_privilege || ' otorgado a ' || v_username);
-        ELSE
-            DBMS_OUTPUT.PUT_LINE('[OK] Privilegio ' || p_privilege || ' ya existe para ' || v_username);
-        END IF;
-    END;
+    v_user          VARCHAR2(128) := UPPER('&&APP_USER');
+    v_password      VARCHAR2(256) := '&&APP_PASSWORD';
+    v_default_ts    VARCHAR2(128);
+    v_temp_ts       VARCHAR2(128);
+    v_count         NUMBER;
 BEGIN
-    SELECT COUNT(*)
-    INTO v_user_count
-    FROM dba_users
-    WHERE username = v_username;
+    BEGIN
+        SELECT tablespace_name
+          INTO v_default_ts
+          FROM (
+                SELECT tablespace_name,
+                       CASE WHEN tablespace_name = 'USERS' THEN 0 ELSE 1 END AS prioridad
+                  FROM dba_tablespaces
+                 WHERE contents = 'PERMANENT'
+                   AND status = 'ONLINE'
+                   AND tablespace_name NOT IN ('SYSTEM', 'SYSAUX')
+                 ORDER BY prioridad, tablespace_name
+               )
+         WHERE ROWNUM = 1;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            SELECT property_value
+              INTO v_default_ts
+              FROM database_properties
+             WHERE property_name = 'DEFAULT_PERMANENT_TABLESPACE';
 
-    IF v_user_count = 0 THEN
+            DBMS_OUTPUT.PUT_LINE(
+                '[WARN] La PDB no tiene un tablespace de aplicacion dedicado.'
+            );
+            DBMS_OUTPUT.PUT_LINE(
+                '[WARN] Se utilizara el tablespace por defecto: ' || v_default_ts
+            );
+    END;
+
+    SELECT property_value
+      INTO v_temp_ts
+      FROM database_properties
+     WHERE property_name = 'DEFAULT_TEMP_TABLESPACE';
+
+    DBMS_OUTPUT.PUT_LINE('[INFO] Tablespace permanente: ' || v_default_ts);
+    DBMS_OUTPUT.PUT_LINE('[INFO] Tablespace temporal:   ' || v_temp_ts);
+
+    SELECT COUNT(*)
+      INTO v_count
+      FROM dba_users
+     WHERE username = v_user;
+
+    IF v_count = 0 THEN
         EXECUTE IMMEDIATE
-            'CREATE USER ' || v_username ||
+            'CREATE USER ' || DBMS_ASSERT.SIMPLE_SQL_NAME(v_user) ||
             ' IDENTIFIED BY "' || REPLACE(v_password, '"', '""') || '"' ||
-            ' DEFAULT TABLESPACE USERS' ||
-            ' TEMPORARY TABLESPACE TEMP' ||
-            ' QUOTA UNLIMITED ON USERS';
-        DBMS_OUTPUT.PUT_LINE('[CREATE] Usuario ' || v_username || ' creado');
+            ' DEFAULT TABLESPACE ' || DBMS_ASSERT.SIMPLE_SQL_NAME(v_default_ts) ||
+            ' TEMPORARY TABLESPACE ' || DBMS_ASSERT.SIMPLE_SQL_NAME(v_temp_ts);
+
+        DBMS_OUTPUT.PUT_LINE('[CREATE] Usuario ' || v_user || ' creado.');
     ELSE
         EXECUTE IMMEDIATE
-            'ALTER USER ' || v_username ||
+            'ALTER USER ' || DBMS_ASSERT.SIMPLE_SQL_NAME(v_user) ||
             ' IDENTIFIED BY "' || REPLACE(v_password, '"', '""') || '"' ||
+            ' DEFAULT TABLESPACE ' || DBMS_ASSERT.SIMPLE_SQL_NAME(v_default_ts) ||
+            ' TEMPORARY TABLESPACE ' || DBMS_ASSERT.SIMPLE_SQL_NAME(v_temp_ts) ||
             ' ACCOUNT UNLOCK';
-        EXECUTE IMMEDIATE 'ALTER USER ' || v_username || ' DEFAULT TABLESPACE USERS';
-        EXECUTE IMMEDIATE 'ALTER USER ' || v_username || ' TEMPORARY TABLESPACE TEMP';
-        EXECUTE IMMEDIATE 'ALTER USER ' || v_username || ' QUOTA UNLIMITED ON USERS';
-        DBMS_OUTPUT.PUT_LINE('[OK] Usuario ' || v_username || ' ya existe; cuenta y cuota verificadas');
+
+        DBMS_OUTPUT.PUT_LINE('[OK] Usuario ' || v_user || ' ya existe.');
     END IF;
 
-    grant_privilege('CREATE SESSION');
-    grant_privilege('CREATE TABLE');
-    grant_privilege('CREATE VIEW');
-    grant_privilege('CREATE SEQUENCE');
-    grant_privilege('CREATE PROCEDURE');
-    grant_privilege('CREATE TRIGGER');
+    EXECUTE IMMEDIATE
+        'ALTER USER ' || DBMS_ASSERT.SIMPLE_SQL_NAME(v_user) ||
+        ' QUOTA UNLIMITED ON ' || DBMS_ASSERT.SIMPLE_SQL_NAME(v_default_ts);
+
+    DBMS_OUTPUT.PUT_LINE(
+        '[OK] Quota configurada sobre ' || v_default_ts || '.'
+    );
 END;
 /
 
+GRANT CREATE SESSION TO &&APP_USER;
+GRANT CREATE TABLE TO &&APP_USER;
+GRANT CREATE VIEW TO &&APP_USER;
+GRANT CREATE SEQUENCE TO &&APP_USER;
+GRANT CREATE PROCEDURE TO &&APP_USER;
+GRANT CREATE TRIGGER TO &&APP_USER;
+
 PROMPT ============================================
-PROMPT [OK] SCHEMA CONFIGURADO
+PROMPT SCHEMA CONFIGURADO CORRECTAMENTE
 PROMPT ============================================
 
 EXIT SUCCESS

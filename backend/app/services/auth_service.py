@@ -6,19 +6,14 @@ import secrets
 from typing import Any, Optional
 
 from app.core.config import settings
-from app.core.security import hash_password, verify_password
+from app.core.security import verify_password
+from app.repositories.oracle import OracleRepositoryError
+from app.repositories.user_account_repository import user_account_repository
 from app.services.session_store import session_store
 
-_DEMO_HASH = hash_password("Demo12345")
-_DEMO_USERS = {
-    "director.demo": {
-        "id": 1,
-        "username": "director.demo",
-        "password_hash": _DEMO_HASH,
-        "role_name": "Director",
-        "is_active": "Y",
-    }
-}
+
+class AuthStoreUnavailable(RuntimeError):
+    """Raised when user authentication storage is unavailable."""
 
 
 def _access_for_role(role: str) -> dict[str, Any]:
@@ -44,7 +39,7 @@ def _access_for_role(role: str) -> dict[str, Any]:
 
 class AuthService:
     def login(self, username: str, password: str) -> Optional[dict[str, Any]]:
-        user = _DEMO_USERS.get(username)
+        user = self._find_user(username)
         if not user or user["is_active"] != "Y":
             return None
         if not verify_password(password, user["password_hash"]):
@@ -70,6 +65,12 @@ class AuthService:
 
     def logout(self, token: str) -> None:
         session_store.delete(token)
+
+    def _find_user(self, username: str) -> Optional[dict[str, Any]]:
+        try:
+            return user_account_repository.find_active_by_username(username)
+        except OracleRepositoryError as exc:
+            raise AuthStoreUnavailable("Authentication store unavailable") from exc
 
 
 auth_service = AuthService()

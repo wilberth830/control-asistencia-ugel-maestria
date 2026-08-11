@@ -7,6 +7,7 @@ set "DB_HOST=localhost"
 set "DB_PORT=1521"
 set "DB_USER=ASISTENCIA_OWNER"
 set "DB_PASSWORD=Asistencia123"
+set "PDB_NAME="
 
 cls
 
@@ -14,13 +15,6 @@ echo ============================================
 echo   INSTALADOR BASE DE DATOS - ASISTENCIA
 echo ============================================
 echo.
-
-REM ============================================================
-REM OBTENER PDB
-REM Permite:
-REM ejecutar-bd.bat
-REM ejecutar-bd.bat FREEPDB1
-REM ============================================================
 
 if not "%~1"=="" (
     set "PDB_NAME=%~1"
@@ -36,12 +30,7 @@ if "%PDB_NAME%"=="" (
     goto :ERROR
 )
 
-REM ============================================================
-REM VALIDAR DEPENDENCIAS
-REM ============================================================
-
 where sqlplus >nul 2>nul
-
 if errorlevel 1 (
     echo.
     echo ERROR: sqlplus no esta disponible en PATH.
@@ -49,16 +38,11 @@ if errorlevel 1 (
 )
 
 where python >nul 2>nul
-
 if errorlevel 1 (
     echo.
     echo ERROR: python no esta disponible en PATH.
     goto :ERROR
 )
-
-REM ============================================================
-REM VALIDAR ARCHIVOS
-REM ============================================================
 
 call :REQUIRE_FILE "%BASE_DIR%database\00_configuracion\00_create_schema.sql"
 if errorlevel 1 goto :ERROR
@@ -78,10 +62,6 @@ if errorlevel 1 goto :ERROR
 call :REQUIRE_FILE "%BASE_DIR%database\03_checks\check_idempotency.py"
 if errorlevel 1 goto :ERROR
 
-REM ============================================================
-REM MOSTRAR CONFIGURACION
-REM ============================================================
-
 echo.
 echo ============================================
 echo CONFIGURACION
@@ -94,10 +74,6 @@ echo Password:  ********
 echo ============================================
 echo.
 
-REM ============================================================
-REM 1. CONFIGURAR SCHEMA
-REM ============================================================
-
 echo [1/5] Configurando PDB y schema...
 echo.
 
@@ -108,10 +84,6 @@ if errorlevel 1 (
     echo ERROR: No se pudo configurar el schema.
     goto :ERROR
 )
-
-REM ============================================================
-REM 2. TABLAS
-REM ============================================================
 
 echo.
 echo [2/5] Creando/validando tablas...
@@ -125,10 +97,6 @@ if errorlevel 1 (
     goto :ERROR
 )
 
-REM ============================================================
-REM 3. INDICES
-REM ============================================================
-
 echo.
 echo [3/5] Creando/validando indices...
 echo.
@@ -141,10 +109,6 @@ if errorlevel 1 (
     goto :ERROR
 )
 
-REM ============================================================
-REM 4. SEED
-REM ============================================================
-
 echo.
 echo [4/5] Ejecutando datos seed...
 echo.
@@ -156,10 +120,6 @@ if errorlevel 1 (
     echo ERROR: Fallo la carga de datos seed.
     goto :ERROR
 )
-
-REM ============================================================
-REM 5. CHECKS
-REM ============================================================
 
 echo.
 echo [5/5] Ejecutando checks...
@@ -181,10 +141,6 @@ if errorlevel 1 (
     goto :ERROR
 )
 
-REM ============================================================
-REM FINAL CORRECTO
-REM ============================================================
-
 echo.
 echo ============================================
 echo INSTALACION COMPLETADA CORRECTAMENTE
@@ -201,29 +157,16 @@ echo.
 pause
 exit /b 0
 
-
-REM ============================================================
-REM FUNCION: VALIDAR ARCHIVO
-REM ============================================================
-
 :REQUIRE_FILE
-
 if not exist "%~1" (
     echo.
     echo ERROR: No existe el archivo:
     echo "%~1"
     exit /b 1
 )
-
 exit /b 0
 
-
-REM ============================================================
-REM FUNCION: EJECUTAR COMO SYSDBA
-REM ============================================================
-
 :RUN_SYSDBA
-
 set "TMP_SQL=%TEMP%\asistencia_sys_%RANDOM%_%RANDOM%.sql"
 
 (
@@ -237,20 +180,11 @@ set "TMP_SQL=%TEMP%\asistencia_sys_%RANDOM%_%RANDOM%.sql"
 ) > "%TMP_SQL%"
 
 sqlplus -L -S /nolog @"%TMP_SQL%"
-
 set "SQLPLUS_RC=%ERRORLEVEL%"
-
 del "%TMP_SQL%" >nul 2>nul
-
 exit /b %SQLPLUS_RC%
 
-
-REM ============================================================
-REM FUNCION: EJECUTAR COMO ASISTENCIA_OWNER
-REM ============================================================
-
 :RUN_OWNER
-
 set "TMP_SQL=%TEMP%\asistencia_owner_%RANDOM%_%RANDOM%.sql"
 
 (
@@ -264,20 +198,11 @@ set "TMP_SQL=%TEMP%\asistencia_owner_%RANDOM%_%RANDOM%.sql"
 ) > "%TMP_SQL%"
 
 sqlplus -L -S /nolog @"%TMP_SQL%"
-
 set "SQLPLUS_RC=%ERRORLEVEL%"
-
 del "%TMP_SQL%" >nul 2>nul
-
 exit /b %SQLPLUS_RC%
 
-
-REM ============================================================
-REM ERROR GENERAL
-REM ============================================================
-
 :ERROR
-
 echo.
 echo ============================================
 echo INSTALACION INTERRUMPIDA
@@ -285,6 +210,5 @@ echo ============================================
 echo.
 echo Revise el error mostrado anteriormente.
 echo.
-
 pause
 exit /b 1
