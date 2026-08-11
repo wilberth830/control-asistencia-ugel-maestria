@@ -43,12 +43,14 @@ class BiometricImportService:
             rows = biometric_repository.list_imports(
                 status=status, month=month, year=year
             )
-            persisted_ids = {row["id"] for row in rows}
-            memory_rows = [
-                deepcopy(row)
+            memory_by_id = {
+                row["id"]: deepcopy(row)
                 for row in self._imports.values()
-                if row["id"] not in persisted_ids
                 if self._matches_filters(row, status=status, month=month, year=year)
+            }
+            rows = [memory_by_id.pop(row["id"], row) for row in rows]
+            memory_rows = [
+                row for row in memory_by_id.values()
             ]
             return memory_rows + rows
         except OracleRepositoryError:

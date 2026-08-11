@@ -674,12 +674,20 @@ function ImportPage() {
   const [imports, setImports] = useState<BiometricImport[]>([]);
   const [rowDrafts, setRowDrafts] = useState<Record<number, ImportRowDraft>>({});
   const [loading, setLoading] = useState(false);
+  const [importsLoading, setImportsLoading] = useState(true);
+  const [importsLoaded, setImportsLoaded] = useState(false);
   const [importAction, setImportAction] = useState("");
   const [rowLoadingId, setRowLoadingId] = useState<number | null>(null);
   const [processingLabel, setProcessingLabel] = useState("");
   const [wizardView, setWizardView] = useState<"file" | "review" | "confirm">("file");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!message) return undefined;
+    const timeoutId = window.setTimeout(() => setMessage(""), 2400);
+    return () => window.clearTimeout(timeoutId);
+  }, [message]);
 
   const syncRowDrafts = (rows: ImportRow[] = []) => {
     setRowDrafts(
@@ -698,18 +706,42 @@ function ImportPage() {
 
   useEffect(() => {
     let cancelled = false;
+    setImportsLoading(true);
     apiClient
       .get<BiometricImport[]>("/api/v1/biometric-imports")
       .then((response) => {
-        if (!cancelled) setImports(response.data);
+        if (!cancelled) {
+          setImports(response.data);
+          setImportsLoaded(true);
+        }
       })
       .catch(() => {
-        if (!cancelled) setImports([]);
+        if (!cancelled) {
+          setImports([]);
+          setImportsLoaded(true);
+          setError("No se pudo cargar el historial de cargas.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setImportsLoading(false);
       });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const loadImports = async () => {
+    setImportsLoading(true);
+    try {
+      const response = await apiClient.get<BiometricImport[]>("/api/v1/biometric-imports");
+      setImports(response.data);
+      setImportsLoaded(true);
+    } catch {
+      setError("No se pudo actualizar el historial de cargas.");
+    } finally {
+      setImportsLoading(false);
+    }
+  };
 
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
@@ -810,8 +842,13 @@ function ImportPage() {
       setRowDrafts({});
       setWizardView("file");
       setImports((current) =>
-        current.map((item) => (item.id === response.data.id ? response.data : item)),
+        current.some((item) => item.id === response.data.id)
+          ? current.map((item) =>
+              item.id === response.data.id ? response.data : item,
+            )
+          : [response.data, ...current],
       );
+      void loadImports();
       setMessage("Carga anulada");
     } catch {
       setError("No se pudo anular la carga.");
@@ -892,7 +929,7 @@ function ImportPage() {
     ? 4
     : wizardView === "confirm"
       ? 3
-      : currentImport || loading
+      : currentImport
         ? 2
         : 1;
 
@@ -1064,7 +1101,13 @@ function ImportPage() {
       )}
       {step === 1 && (
       <section className="card">
-        <div className="card-header">Historial de cargas</div>
+        <div className="card-header">
+          Historial de cargas
+          {importsLoading && <span className="subtle-inline">Cargando</span>}
+          {!importsLoading && importsLoaded && (
+            <span className="subtle-inline">{imports.length} registros</span>
+          )}
+        </div>
         <DataTable
           columns={["Archivo", "Período", "Estado", "Filas"]}
           rows={imports.map((item) => [
@@ -1073,7 +1116,9 @@ function ImportPage() {
             statusText(item.status),
             String(item.total_rows),
           ])}
-          emptyText="Sin cargas registradas"
+          emptyText={
+            importsLoading ? "Cargando historial..." : "Sin cargas registradas"
+          }
         />
       </section>
       )}
@@ -1246,6 +1291,16 @@ function AttendancePage() {
     nextYear = year,
     nextImportId = selectedImportId,
   ) => {
+    if (!nextImportId) {
+      setAttendanceRows([]);
+      setSelectedDay(null);
+      setSelectedStatus("present");
+      setLateMinutes(0);
+      setLockedDayKey("");
+      setError("");
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -1263,9 +1318,9 @@ function AttendancePage() {
       ]);
       setAttendanceRows(attendanceResponse.data);
       setStaffMembers(staffResponse.data);
-      setSelectedDay(attendanceResponse.data[0] ?? null);
-      setSelectedStatus(attendanceResponse.data[0]?.status ?? "present");
-      setLateMinutes(attendanceResponse.data[0]?.late_minutes ?? 0);
+      setSelectedDay(null);
+      setSelectedStatus("present");
+      setLateMinutes(0);
       setLockedDayKey("");
     } catch {
       setError("No se pudo cargar la asistencia.");
@@ -1285,7 +1340,7 @@ function AttendancePage() {
       .then(async ([importsResponse, staffResponse]) => {
         if (cancelled) return;
         const imports = sortAttendanceImports(
-          importsResponse.data.filter((item) => item.status !== "cancelled"),
+          importsResponse.data.filter((item) => item.status === "confirmed"),
         );
         const selectedPeriod = periodFromImports(
           imports,
@@ -1307,6 +1362,15 @@ function AttendancePage() {
         setMonthImports(importsForMonth);
         setSelectedImportId(nextImportId);
         setStaffMembers(staffResponse.data);
+        if (!nextImportId) {
+          setAttendanceRows([]);
+          setSelectedDay(null);
+          setSelectedStatus("present");
+          setLateMinutes(0);
+          setLockedDayKey("");
+          setError("");
+          return;
+        }
         const attendanceResponse = await apiClient.get<AttendanceDay[]>(
           "/api/v1/attendance-records",
           {
@@ -1319,9 +1383,9 @@ function AttendancePage() {
         );
         if (cancelled) return;
         setAttendanceRows(attendanceResponse.data);
-        setSelectedDay(attendanceResponse.data[0] ?? null);
-        setSelectedStatus(attendanceResponse.data[0]?.status ?? "present");
-        setLateMinutes(attendanceResponse.data[0]?.late_minutes ?? 0);
+        setSelectedDay(null);
+        setSelectedStatus("present");
+        setLateMinutes(0);
         setLockedDayKey("");
       })
       .catch(() => {
@@ -1344,6 +1408,14 @@ function AttendancePage() {
       : importsForMonth[0]?.id ?? 0;
     setMonthImports(importsForMonth);
     setSelectedImportId(nextImportId);
+    if (!nextImportId) {
+      setAttendanceRows([]);
+      setSelectedDay(null);
+      setSelectedStatus("present");
+      setLateMinutes(0);
+      setLockedDayKey("");
+      setError("");
+    }
   };
 
   const selectImport = (nextImportId: number) => {
@@ -1359,6 +1431,15 @@ function AttendancePage() {
       : importsForMonth[0]?.id ?? 0;
     setMonthImports(importsForMonth);
     setSelectedImportId(nextImportId);
+    if (!nextImportId) {
+      setAttendanceRows([]);
+      setSelectedDay(null);
+      setSelectedStatus("present");
+      setLateMinutes(0);
+      setLockedDayKey("");
+      setError("");
+      return;
+    }
     await loadAttendance(month, year, nextImportId);
   };
 
@@ -1415,6 +1496,7 @@ function AttendancePage() {
   const fieldsLocked = !selectedDay || savingDay || lockedDayKey === selectedDayKey;
   const availableYears = yearsFromImports(allImports, year);
   const availableMonths = monthsFromImports(allImports, year, month);
+  const noMonthFiles = !loading && monthImports.length === 0;
 
   return (
     <>
@@ -1471,10 +1553,15 @@ function AttendancePage() {
         <label className="form-field grow">
           <span>Archivo</span>
           <select
+            disabled={!monthImports.length}
             onChange={(event) => selectImport(Number(event.target.value))}
             value={selectedImportId}
           >
-            <option value="0">Todos los archivos del mes</option>
+            <option value="0">
+              {monthImports.length
+                ? "Todos los archivos del mes"
+                : "Sin archivos para este mes"}
+            </option>
             {monthImports.map((item) => (
               <option key={item.id} value={item.id}>
                 #{item.id} · {item.file_name} · {statusText(item.status)}
@@ -1485,7 +1572,7 @@ function AttendancePage() {
         <div className="filter-actions">
           <button
             className="btn btn-sm btn-primary"
-            disabled={loading}
+            disabled={loading || !monthImports.length}
             onClick={applyAttendanceFilters}
             type="button"
           >
@@ -1494,8 +1581,11 @@ function AttendancePage() {
           </button>
         </div>
       </div>
-      {message && <div className="alert-success">{message}</div>}
-      {error && <div className="alert-danger">{error}</div>}
+      {message && <div className="attendance-toast">{message}</div>}
+      {noMonthFiles && (
+        <div className="alert-info">No hay archivos disponibles para este mes.</div>
+      )}
+      {error && !noMonthFiles && <div className="alert-danger">{error}</div>}
       <div className="attendance-layout">
         <section className="card attendance-grid">
           <div className="card-header">
@@ -1505,6 +1595,7 @@ function AttendancePage() {
             month={month}
             onSelect={selectDay}
             rows={attendanceRows}
+            selectedDayKey={selectedDayKey}
             staffById={staffById}
             year={year}
           />
@@ -1860,12 +1951,14 @@ function AttendanceMonthGrid({
   staffById,
   month,
   year,
+  selectedDayKey,
   onSelect,
 }: {
   rows: AttendanceDay[];
   staffById: Record<number, StaffMember>;
   month: number;
   year: number;
+  selectedDayKey: string;
   onSelect: (row: AttendanceDay) => void;
 }) {
   const days = Array.from(
@@ -1911,7 +2004,12 @@ function AttendanceMonthGrid({
                       <td key={day}>
                         {row ? (
                           <button
-                            className={`day-cell ${row.status}`}
+                            className={`day-cell ${row.status} ${
+                              selectedDayKey ===
+                              `${row.staff_member_id}-${row.attendance_date}`
+                                ? "selected"
+                                : ""
+                            }`}
                             onClick={() => onSelect(row)}
                             type="button"
                           >

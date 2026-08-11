@@ -230,6 +230,16 @@ select {
   padding: 8px 10px;
 }
 
+.alert-info {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius);
+  color: #1d4ed8;
+  font-size: 13px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+}
+
 .app {
   display: flex;
   min-height: 100vh;
@@ -400,9 +410,9 @@ select {
   box-shadow: var(--shadow);
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding: 12px 16px;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 18px 20px;
 }
 
 .filters.vertical {
@@ -417,14 +427,14 @@ select {
 
 .filters .form-field {
   margin-bottom: 0;
-  max-width: 150px;
-  min-width: 110px;
+  max-width: 190px;
+  min-width: 140px;
 }
 
 .filters .form-field.grow {
   flex: 1;
-  max-width: 260px;
-  min-width: 180px;
+  max-width: 520px;
+  min-width: 280px;
 }
 
 .filter-actions {
@@ -633,6 +643,12 @@ select {
   padding: 10px 16px;
 }
 
+.subtle-inline {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
 .card-body {
   padding: 16px;
 }
@@ -750,7 +766,7 @@ tbody tr:last-child td {
 }
 
 .attendance-month-wrap {
-  max-height: 520px;
+  max-height: 68vh;
   overflow: auto;
 }
 
@@ -796,9 +812,19 @@ tbody tr:last-child td {
   min-width: 26px;
 }
 
+.day-cell.selected {
+  border: 3px solid #15803d;
+  box-shadow: 0 0 0 2px #bbf7d0;
+  color: #14532d;
+}
+
 .day-cell.present {
   background: var(--success-bg);
   color: var(--success);
+}
+
+.day-cell.present.selected {
+  background: #86efac;
 }
 
 .day-cell.late {
@@ -1040,8 +1066,10 @@ tbody tr:last-child td {
 
 .attendance-layout {
   display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(0, 9fr) minmax(180px, 1fr);
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  min-height: 68vh;
+  width: 100%;
 }
 
 .attendance-grid,
@@ -1050,12 +1078,24 @@ tbody tr:last-child td {
 }
 
 .attendance-panel {
-  min-width: 180px;
+  min-width: 240px;
+}
+
+.attendance-grid .card-header,
+.attendance-panel .card-header {
+  font-size: 15px;
+  min-height: 46px;
+  padding: 14px 18px;
+}
+
+.attendance-grid,
+.attendance-panel {
+  min-height: 68vh;
 }
 
 .panel-stack {
   display: grid;
-  gap: 12px;
+  gap: 16px;
 }
 
 .edit-summary {
@@ -1064,7 +1104,8 @@ tbody tr:last-child td {
   border-radius: var(--radius);
   display: grid;
   gap: 10px;
-  padding: 12px;
+  min-height: 112px;
+  padding: 14px;
 }
 
 .edit-summary span {
@@ -1079,7 +1120,7 @@ tbody tr:last-child td {
 .edit-summary strong {
   color: var(--text);
   display: block;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.25;
   overflow-wrap: anywhere;
 }
@@ -1087,7 +1128,22 @@ tbody tr:last-child td {
 .edit-summary-grid {
   display: grid;
   gap: 8px;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
+}
+
+.attendance-toast {
+  background: #dcfce7;
+  border: 1px solid #86efac;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  color: #166534;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 14px;
+  position: fixed;
+  right: 24px;
+  top: calc(var(--header-h) + 12px);
+  z-index: 60;
 }
 
 .btn-spinner {

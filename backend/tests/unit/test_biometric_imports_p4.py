@@ -244,3 +244,23 @@ def test_cancel_draft_and_reject_already_cancelled(
 
     assert cancel_again_response.status_code == 409
     assert cancel_again_response.json() == {"detail": "Import is already cancelled"}
+
+
+def test_cancelled_import_remains_visible_in_import_history(
+    auth_headers: dict[str, str],
+) -> None:
+    client = TestClient(app)
+    import_id = create_import(client, auth_headers).json()["id"]
+
+    cancel_response = client.post(
+        f"/api/v1/biometric-imports/{import_id}/cancellation",
+        json={"reason": "Archivo/mes incorrecto"},
+        headers=auth_headers,
+    )
+    assert cancel_response.status_code == 200
+
+    list_response = client.get("/api/v1/biometric-imports", headers=auth_headers)
+
+    assert list_response.status_code == 200
+    imports_by_id = {item["id"]: item for item in list_response.json()}
+    assert imports_by_id[import_id]["status"] == "cancelled"

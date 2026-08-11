@@ -34,6 +34,12 @@ Persistencia Oracle: ejecutar `database/01_schema` + `02_seed` y cablear reposit
 
 Mockups: sube HTML a `disenos_base/`.
 
+## Regla de mantenimiento
+
+Cuando se solicite una correcciÃ³n o mejora puntual, no modificar funcionalidades
+no relacionadas con el pedido. Antes de tocar un flujo adicional, confirmar el
+alcance con el usuario.
+
 
 ## Crear nuevo usuario 
 user

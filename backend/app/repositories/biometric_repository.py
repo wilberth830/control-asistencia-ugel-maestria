@@ -108,7 +108,19 @@ class BiometricRepository:
         try:
             with oracle_connection() as connection:
                 with connection.cursor() as cursor:
-                    cursor.execute(sql, id=import_id, **self._import_payload(data))
+                    payload = self._import_payload(data)
+                    cursor.execute(
+                        sql,
+                        id=import_id,
+                        status=payload["status"],
+                        period_start=payload["period_start"],
+                        period_end=payload["period_end"],
+                        total_rows=payload["total_rows"],
+                        ok_rows=payload["ok_rows"],
+                        error_rows=payload["error_rows"],
+                        matched_rows=payload["matched_rows"],
+                        new_rows=payload["new_rows"],
+                    )
                     if cursor.rowcount == 0:
                         connection.rollback()
                         return None
