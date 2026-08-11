@@ -110,7 +110,12 @@ def main() -> None:
 
     assert_contains(config, "ALTER SESSION SET CONTAINER = &&PDB_NAME")
     assert_contains(config, "FROM dba_users")
-    assert_contains(config, "grant_privilege('CREATE SESSION')")
+    assert_contains(config, "GRANT CREATE SESSION TO &&APP_USER")
+    assert_contains(config, "GRANT CREATE TABLE TO &&APP_USER")
+    assert_contains(config, "GRANT CREATE VIEW TO &&APP_USER")
+    assert_contains(config, "GRANT CREATE SEQUENCE TO &&APP_USER")
+    assert_contains(config, "GRANT CREATE PROCEDURE TO &&APP_USER")
+    assert_contains(config, "GRANT CREATE TRIGGER TO &&APP_USER")
     assert_not_contains(config, "GRANT DBA")
     assert_not_contains(config, "Asistencia123")
 
