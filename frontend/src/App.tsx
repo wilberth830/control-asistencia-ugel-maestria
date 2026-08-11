@@ -8,7 +8,7 @@ import {
   useNavigate,
 } from "react-router-dom";
 
-import apiClient from "./services/apiClient";
+import apiClient, { SESSION_EXPIRED_EVENT } from "./services/apiClient";
 
 type AccessMap = {
   modules: string[];
@@ -139,6 +139,8 @@ type Annex03Report = {
 };
 
 const STORAGE_KEY = "chiquistrukis.session";
+const REMEMBERED_USERNAME_KEY = "chiquistrukis.rememberedUsername";
+const REMEMBER_PREFERENCE_KEY = "chiquistrukis.rememberMe";
 
 const navigationItems = [
   { to: "/dashboard", label: "Dashboard", icon: "D" },
@@ -150,61 +152,127 @@ const navigationItems = [
 ];
 
 function readStoredSession(): Session | null {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as Session;
-  } catch {
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem("token");
-    return null;
+  for (const storage of [localStorage, sessionStorage]) {
+    const raw = storage.getItem(STORAGE_KEY);
+    if (!raw) continue;
+    try {
+      return JSON.parse(raw) as Session;
+    } catch {
+      storage.removeItem(STORAGE_KEY);
+      storage.removeItem("token");
+    }
+  }
+  return null;
+}
+
+function clearStoredSession() {
+  for (const storage of [localStorage, sessionStorage]) {
+    storage.removeItem(STORAGE_KEY);
+    storage.removeItem("token");
   }
 }
 
 function App() {
   const [session, setSession] = useState<Session | null>(() => readStoredSession());
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const navigate = useNavigate();
 
-  const handleSession = (nextSession: Session | null) => {
+  useEffect(() => {
+    const expireSession = () => {
+      clearStaffMembersCache();
+      clearStoredSession();
+      setSession(null);
+      setSessionExpired(true);
+    };
+
+    window.addEventListener(SESSION_EXPIRED_EVENT, expireSession);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, expireSession);
+  }, []);
+
+  const handleSession = (nextSession: Session | null, rememberSession = true) => {
     setSession(nextSession);
     if (nextSession) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession));
-      localStorage.setItem("token", nextSession.token);
+      setSessionExpired(false);
+      clearStoredSession();
+      const storage = rememberSession ? localStorage : sessionStorage;
+      storage.setItem(STORAGE_KEY, JSON.stringify(nextSession));
+      storage.setItem("token", nextSession.token);
+      localStorage.setItem(REMEMBER_PREFERENCE_KEY, String(rememberSession));
+      if (rememberSession) {
+        localStorage.setItem(REMEMBERED_USERNAME_KEY, nextSession.username);
+      } else {
+        localStorage.removeItem(REMEMBERED_USERNAME_KEY);
+      }
     } else {
       clearStaffMembersCache();
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem("token");
+      clearStoredSession();
     }
   };
 
+  const returnToLogin = () => {
+    setSessionExpired(false);
+    navigate("/login", { replace: true });
+  };
+
   return (
-    <Routes>
-      <Route
-        path="/login"
-        element={
-          session ? (
-            <Navigate to="/dashboard" replace />
-          ) : (
-            <LoginPage onLogin={handleSession} />
-          )
-        }
-      />
-      <Route
-        path="/*"
-        element={
-          session ? (
-            <Shell session={session} onLogout={() => handleSession(null)} />
-          ) : (
-            <Navigate to="/login" replace />
-          )
-        }
-      />
-    </Routes>
+    <>
+      <Routes>
+        <Route
+          path="/login"
+          element={
+            session ? (
+              <Navigate to="/dashboard" replace />
+            ) : (
+              <LoginPage onLogin={handleSession} />
+            )
+          }
+        />
+        <Route
+          path="/*"
+          element={
+            session ? (
+              <Shell session={session} onLogout={() => handleSession(null)} />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+      </Routes>
+      {sessionExpired && (
+        <div className="modal-backdrop confirmation-backdrop" role="presentation">
+          <section
+            aria-labelledby="session-expired-title"
+            aria-modal="true"
+            className="confirmation-card"
+            role="dialog"
+          >
+            <div className="confirmation-icon">!</div>
+            <h2 id="session-expired-title">Sesión expirada</h2>
+            <p>Tu token ha expirado. Vuelve a ingresar para continuar.</p>
+            <div className="confirmation-actions">
+              <button className="btn btn-primary" onClick={returnToLogin} type="button">
+                Volver a ingresar
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+    </>
   );
 }
 
-function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) {
-  const [username, setUsername] = useState("director.demo");
+function LoginPage({
+  onLogin,
+}: {
+  onLogin: (session: Session, rememberSession: boolean) => void;
+}) {
+  const [username, setUsername] = useState(
+    () => localStorage.getItem(REMEMBERED_USERNAME_KEY) ?? "director.demo",
+  );
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(
+    () => localStorage.getItem(REMEMBER_PREFERENCE_KEY) !== "false",
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
@@ -218,7 +286,7 @@ function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) {
         username,
         password,
       });
-      onLogin(response.data);
+      onLogin(response.data, rememberMe);
       navigate("/dashboard", { replace: true });
     } catch {
       setError("No se pudo iniciar sesión");
@@ -252,7 +320,12 @@ function LoginPage({ onLogin }: { onLogin: (session: Session) => void }) {
         </label>
         <div className="login-row">
           <label>
-            <input type="checkbox" defaultChecked /> Recordarme
+            <input
+              checked={rememberMe}
+              onChange={(event) => setRememberMe(event.target.checked)}
+              type="checkbox"
+            />{" "}
+            Recordarme
           </label>
           <span>Administrador UGEL</span>
         </div>
