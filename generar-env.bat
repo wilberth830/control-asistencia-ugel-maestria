@@ -51,17 +51,17 @@ echo ============================================
 echo.
 
 (
-    echo APP_NAME=CHIQUISTRUKIS API
-    echo APP_ENV=development
-    echo APP_DEBUG=true
+    echo APP_NAME="CHIQUISTRUKIS API"
+    echo APP_ENV="development"
+    echo APP_DEBUG="true"
     echo.
-    echo ORACLE_USER=%DB_USER%
-    echo ORACLE_PASSWORD=%DB_PASSWORD%
-    echo ORACLE_DSN=%DB_HOST%:%DB_PORT%/%PDB_NAME%
+    echo ORACLE_USER="%DB_USER%"
+    echo ORACLE_PASSWORD="%DB_PASSWORD%"
+    echo ORACLE_DSN="%DB_HOST%:%DB_PORT%/%PDB_NAME%"
     echo.
-    echo REDIS_URL=redis://127.0.0.1:6379/0
-    echo ACCESS_TOKEN_EXPIRE_MINUTES=60
-    echo APP_ALLOW_MEMORY_SESSION=true
+    echo REDIS_URL="redis://127.0.0.1:6379/0"
+    echo ACCESS_TOKEN_EXPIRE_MINUTES="60"
+    echo APP_ALLOW_MEMORY_SESSION="true"
 ) > "%BASE_DIR%backend\.env"
 
 if errorlevel 1 (
@@ -71,7 +71,7 @@ if errorlevel 1 (
 )
 
 (
-    echo VITE_API_BASE_URL=http://127.0.0.1:8000
+    echo VITE_API_BASE_URL="http://127.0.0.1:8000"
 ) > "%BASE_DIR%frontend\.env"
 
 if errorlevel 1 (
