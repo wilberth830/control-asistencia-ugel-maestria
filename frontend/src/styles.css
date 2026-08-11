@@ -1213,6 +1213,38 @@ tbody tr:last-child td {
   padding: 8px 12px 0;
 }
 
+.excel-preview-header {
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  text-align: center;
+}
+
+.excel-norm {
+  font-weight: 700;
+  padding: 8px 12px 3px;
+}
+
+.excel-annex {
+  font-weight: 700;
+  padding: 2px;
+}
+
+.excel-title {
+  background: #00a1d6;
+  color: #000;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 5px 12px;
+}
+
+.excel-data {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: center;
+  padding: 8px 12px;
+}
+
 .report-tabs button {
   background: transparent;
   border: 0;
