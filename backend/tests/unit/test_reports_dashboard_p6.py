@@ -130,3 +130,56 @@ def test_reports_reject_xlsx_in_json_step(auth_headers: dict[str, str]) -> None:
 
     assert response.status_code == 400
     assert response.json() == {"detail": "Only JSON format is available"}
+
+
+def test_annex_03_filters_by_import_id(auth_headers: dict[str, str]) -> None:
+    client = TestClient(app)
+    upload_response = client.post(
+        "/api/v1/biometric-imports",
+        files={"file": ("marks.csv", CSV_CONTENT, "text/csv")},
+        headers=auth_headers,
+    )
+    assert upload_response.status_code == 201
+    import_id = upload_response.json()["id"]
+
+    confirm_response = client.post(
+        f"/api/v1/biometric-imports/{import_id}/confirmation",
+        headers=auth_headers,
+    )
+    assert confirm_response.status_code == 200
+
+    response = client.get(
+        "/api/v1/reports/annex-03",
+        params={"month": 7, "year": 2026, "format": "json", "import_id": import_id},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "attendance_day"
+    assert payload["rows"]
+    assert payload["rows"][0]["dni"] == "45678912"
+
+
+def test_monthly_export_accepts_import_id(auth_headers: dict[str, str]) -> None:
+    client = TestClient(app)
+    upload_response = client.post(
+        "/api/v1/biometric-imports",
+        files={"file": ("marks.csv", CSV_CONTENT, "text/csv")},
+        headers=auth_headers,
+    )
+    assert upload_response.status_code == 201
+    import_id = upload_response.json()["id"]
+
+    confirm_response = client.post(
+        f"/api/v1/biometric-imports/{import_id}/confirmation",
+        headers=auth_headers,
+    )
+    assert confirm_response.status_code == 200
+
+    response = client.get(
+        "/api/v1/reports/monthly-export",
+        params={"month": 7, "year": 2026, "import_id": import_id},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

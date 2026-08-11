@@ -140,6 +140,26 @@ type Annex03Report = {
   }>;
 };
 
+type Annex04Report = {
+  institution: {
+    ugel: string;
+    school_name: string;
+    modular_code: string;
+    education_level: string;
+    shift_name: string;
+  };
+  period: { month: number; year: number };
+  staff_count: number;
+  totals: {
+    present: number;
+    late: number;
+    absent: number;
+    justified: number;
+    leave: number;
+    permission: number;
+  };
+};
+
 const STORAGE_KEY = "chiquistrukis.session";
 const REMEMBERED_USERNAME_KEY = "chiquistrukis.rememberedUsername";
 const REMEMBER_PREFERENCE_KEY = "chiquistrukis.rememberMe";
@@ -1785,21 +1805,59 @@ function JustificationsPage() {
 function ReportsPage() {
   const [month, setMonth] = useState(7);
   const [year, setYear] = useState(2026);
-  const [report, setReport] = useState<Annex03Report | null>(null);
+  const [monthImports, setMonthImports] = useState<BiometricImport[]>([]);
+  const [selectedImportId, setSelectedImportId] = useState(0);
+  const [annex03Report, setAnnex03Report] = useState<Annex03Report | null>(null);
+  const [annex04Report, setAnnex04Report] = useState<Annex04Report | null>(null);
   const [previewSheet, setPreviewSheet] = useState<"attendance" | "consolidated">("attendance");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const selectedImport = monthImports.find((item) => item.id === selectedImportId) || null;
+
+  const loadImports = async (nextMonth: number, nextYear: number) => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await apiClient.get<BiometricImport[]>("/api/v1/biometric-imports", {
+        params: { status: "confirmed", month: nextMonth, year: nextYear },
+      });
+      const imports = response.data;
+      setMonthImports(imports);
+      setSelectedImportId(imports[0]?.id ?? 0);
+    } catch {
+      setError("No se pudieron cargar los archivos de asistencia.");
+      setMonthImports([]);
+      setSelectedImportId(0);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadImports(month, year);
+  }, [month, year]);
 
   const generatePreview = async () => {
     setLoading(true);
     setError("");
     try {
-      const response = await apiClient.get<Annex03Report>("/api/v1/reports/annex-03", {
-        params: { month, year, format: "json" },
-      });
-      setReport(response.data);
+      const params = {
+        month,
+        year,
+        format: "json",
+        import_id: selectedImportId || undefined,
+      } as const;
+      const [attendanceResponse, consolidatedResponse] = await Promise.all([
+        apiClient.get<Annex03Report>("/api/v1/reports/annex-03", { params }),
+        apiClient.get<Annex04Report>("/api/v1/reports/annex-04", { params }),
+      ]);
+      setAnnex03Report(attendanceResponse.data);
+      setAnnex04Report(consolidatedResponse.data);
     } catch {
       setError("No se pudo generar la vista previa del reporte.");
+      setAnnex03Report(null);
+      setAnnex04Report(null);
     } finally {
       setLoading(false);
     }
@@ -1810,7 +1868,11 @@ function ReportsPage() {
     setError("");
     try {
       const response = await apiClient.get("/api/v1/reports/monthly-export", {
-        params: { month, year },
+        params: {
+          month,
+          year,
+          import_id: selectedImportId || undefined,
+        },
         responseType: "blob",
       });
       const url = URL.createObjectURL(response.data as Blob);
@@ -1826,13 +1888,14 @@ function ReportsPage() {
     }
   };
 
-  const previewRows = (report?.rows ?? []).map((row, index) => {
+  const previewRows = (annex03Report?.rows ?? []).map((row, index) => {
     const counts = row.days.reduce<Record<string, number>>((result, day) => {
       result[day.status] = (result[day.status] ?? 0) + 1;
       return result;
     }, {});
     const lateMinutes = row.days.reduce(
-      (total, day) => total + (day.status === "late" ? day.late_minutes : 0), 0,
+      (total, day) => total + (day.status === "late" ? day.late_minutes : 0),
+      0,
     );
     return { ...row, index: index + 1, counts, lateMinutes };
   });
@@ -1853,26 +1916,61 @@ function ReportsPage() {
           </label>
           <label className="form-field">
             <span>Mes</span>
-            <select onChange={(event) => setMonth(Number(event.target.value))} value={month}>
-              {monthOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            <select
+              onChange={(event) => setMonth(Number(event.target.value))}
+              value={month}
+            >
+              {monthOptions.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
             </select>
           </label>
           <label className="form-field">
             <span>Año</span>
-            <select onChange={(event) => setYear(Number(event.target.value))} value={year}>
+            <select
+              onChange={(event) => setYear(Number(event.target.value))}
+              value={year}
+            >
               <option value="2026">2026</option>
               <option value="2025">2025</option>
             </select>
           </label>
-          <label className="form-field">
+          <label className="form-field grow">
             <span>Archivo</span>
-            <select value="xlsx" disabled><option value="xlsx">Excel (.xlsx)</option></select>
+            <select
+              disabled={!monthImports.length}
+              value={selectedImportId}
+              onChange={(event) => setSelectedImportId(Number(event.target.value))}
+            >
+              <option value={0}>
+                {monthImports.length
+                  ? "Todos los archivos del mes"
+                  : "Sin archivos para este mes"}
+              </option>
+              {monthImports.map((item) => (
+                <option key={item.id} value={item.id}>
+                  #{item.id} · {item.file_name}
+                </option>
+              ))}
+            </select>
           </label>
           <div className="report-actions">
-            <button className="btn btn-secondary" disabled={loading} onClick={generatePreview} type="button">
+            <button
+              className="btn btn-secondary"
+              disabled={loading || (!monthImports.length && selectedImportId !== 0)}
+              onClick={generatePreview}
+              type="button"
+            >
               {loading ? "Generando..." : "Previsualizar"}
             </button>
-            <button className="btn btn-primary" disabled={loading} onClick={downloadExcel} type="button">
+            <button
+              className="btn btn-primary"
+              disabled={loading}
+              onClick={downloadExcel}
+              type="button"
+            >
               Descargar Excel
             </button>
           </div>
@@ -1881,42 +1979,112 @@ function ReportsPage() {
       {error && <div className="alert-danger">{error}</div>}
       <section className="card report-preview">
         <div className="card-header">
-          <span>Vista previa {report ? `· ${monthOptions.find((item) => item.value === month)?.label} ${year}` : ""}</span>
-          {report && <span className="report-institution">{report.institution.school_name} · {report.institution.ugel}</span>}
+          <span>
+            Vista previa
+            {annex03Report
+              ? ` · ${monthOptions.find((item) => item.value === month)?.label} ${year}`
+              : ""}
+          </span>
+          {annex03Report && (
+            <span className="report-institution">
+              {annex03Report.institution.school_name} · {annex03Report.institution.ugel}
+            </span>
+          )}
         </div>
-        {report && (
+        {annex03Report && (
           <div className="excel-preview-header">
-            <div className="excel-norm">NORMAS PARA EL REGISTRO Y CONTROL DE ASISTENCIA</div>
-            <div className="excel-annex">{previewSheet === "attendance" ? "ANEXO 03" : "ANEXO 04"}</div>
-            <div className="excel-title">{previewSheet === "attendance" ? "FORMATO 01: REPORTE DE ASISTENCIA DETALLADO" : "FORMATO 02: REPORTE CONSOLIDADO DE INASISTENCIAS, TARDANZAS Y PERMISOS"}</div>
-            <div className="excel-data"><strong>UGEL:</strong> {report.institution.ugel} <strong>· INSTITUCIÓN EDUCATIVA:</strong> {report.institution.school_name} <strong>· MES:</strong> {monthOptions.find((item) => item.value === month)?.label?.toUpperCase()} <strong>· AÑO:</strong> {year}</div>
+            <div className="excel-norm">
+              NORMAS PARA EL REGISTRO Y CONTROL DE ASISTENCIA Y SU APLICACIÓN EN LA PLANILLA ÚNICA DE PAGOS
+            </div>
+            <div className="excel-annex">
+              {previewSheet === "attendance" ? "ANEXO 03" : "ANEXO 04"}
+            </div>
+            <div className="excel-title">
+              {previewSheet === "attendance"
+                ? "FORMATO 01: REPORTE DE ASISTENCIA DETALLADO"
+                : "FORMATO 02: REPORTE CONSOLIDADO DE INASISTENCIAS, TARDANZAS Y PERMISOS SIN GOCE DE REMUNERACIÓN"}
+            </div>
+            <div className="excel-data">
+              <strong>UGEL:</strong> {annex03Report.institution.ugel}
+              <strong> · INSTITUCIÓN EDUCATIVA:</strong> {annex03Report.institution.school_name}
+              <strong> · MES:</strong> {monthOptions.find((item) => item.value === month)?.label?.toUpperCase()}
+              <strong> · AÑO:</strong> {year}
+              {selectedImport && (
+                <><strong> · Archivo:</strong> {selectedImport.file_name}</>
+              )}
+            </div>
           </div>
         )}
         <div className="report-tabs">
-          <button className={previewSheet === "attendance" ? "active" : ""} onClick={() => setPreviewSheet("attendance")} type="button">Asistencia · Anexo 03</button>
-          <button className={previewSheet === "consolidated" ? "active" : ""} onClick={() => setPreviewSheet("consolidated")} type="button">Reporte consolidado · Anexo 04</button>
+          <button
+            className={previewSheet === "attendance" ? "active" : ""}
+            onClick={() => setPreviewSheet("attendance")}
+            type="button"
+          >
+            Asistencia · Anexo 03
+          </button>
+          <button
+            className={previewSheet === "consolidated" ? "active" : ""}
+            onClick={() => setPreviewSheet("consolidated")}
+            type="button"
+          >
+            Reporte consolidado · Anexo 04
+          </button>
         </div>
-        {report ? previewSheet === "attendance" ? (
-          <DataTable
-            columns={["N°", "DNI", "Apellidos y nombres", "Asistencia", "Tardanzas", "Faltas", "Justificados"]}
-            rows={previewRows.map((row) => [
-              String(row.index), row.dni, row.full_name,
-              String(row.counts.present ?? 0), String(row.counts.late ?? 0),
-              String(row.counts.absent ?? 0), String(row.counts.justified ?? 0),
-            ])}
-            emptyText="No hay asistencia registrada para este mes"
-          />
+        {annex03Report ? (
+          previewSheet === "attendance" ? (
+            <DataTable
+              columns={[
+                "N°",
+                "DNI",
+                "Apellidos y nombres",
+                "Asistencia",
+                "Tardanzas",
+                "Faltas",
+                "Justificados",
+              ]}
+              rows={previewRows.map((row) => [
+                String(row.index),
+                row.dni,
+                row.full_name,
+                String(row.counts.present ?? 0),
+                String(row.counts.late ?? 0),
+                String(row.counts.absent ?? 0),
+                String(row.counts.justified ?? 0),
+              ])}
+              emptyText="No hay asistencia registrada para este mes"
+            />
+          ) : annex04Report ? (
+            <DataTable
+              columns={[
+                "Total personal",
+                "Asistencias",
+                "Tardanzas",
+                "Inasistencias",
+                "Justificados",
+                "Licencias",
+                "Permisos",
+              ]}
+              rows={[
+                [
+                  String(annex04Report.staff_count),
+                  String(annex04Report.totals.present),
+                  String(annex04Report.totals.late),
+                  String(annex04Report.totals.absent),
+                  String(annex04Report.totals.justified),
+                  String(annex04Report.totals.leave),
+                  String(annex04Report.totals.permission),
+                ],
+              ]}
+            />
+          ) : (
+            <div className="report-empty">No hay datos de reporte consolidados.</div>
+          )
         ) : (
-          <DataTable
-            columns={["N°", "DNI", "Apellidos y nombres", "Inasist. justificadas", "Licencias", "Faltas", "Tardanzas (min.)", "Permisos"]}
-            rows={previewRows.map((row) => [
-              String(row.index), row.dni, row.full_name,
-              String(row.counts.justified ?? 0), String(row.counts.leave ?? 0),
-              String(row.counts.absent ?? 0), String(row.lateMinutes), String(row.counts.permission ?? 0),
-            ])}
-            emptyText="No hay asistencia registrada para este mes"
-          />
-        ) : <div className="report-empty">Selecciona el período y presiona <strong>Previsualizar</strong>.</div>}
+          <div className="report-empty">
+            Selecciona el período y presiona <strong>Previsualizar</strong>.
+          </div>
+        )}
       </section>
     </>
   );

@@ -11,9 +11,12 @@ router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
 
 @router.get("/monthly-export")
 def monthly_export(
-    month: int, year: int, session: dict = Depends(require_token)
+    month: int,
+    year: int,
+    import_id: int | None = None,
+    session: dict = Depends(require_token),
 ):
-    workbook = report_service.monthly_workbook(month, year)
+    workbook = report_service.monthly_workbook(month, year, import_id=import_id)
     filename = f"asistencia_{year:04d}_{month:02d}.xlsx"
     return StreamingResponse(
         workbook,
@@ -24,17 +27,25 @@ def monthly_export(
 
 @router.get("/annex-03")
 def annex03(
-    month: int, year: int, format: str = "json", session: dict = Depends(require_token)
+    month: int,
+    year: int,
+    import_id: int | None = None,
+    format: str = "json",
+    session: dict = Depends(require_token),
 ):
     if format != "json":
         raise HTTPException(status_code=400, detail="Only JSON format is available")
-    return report_service.annex_03(month, year)
+    return report_service.annex_03(month, year, import_id=import_id)
 
 
 @router.get("/annex-04")
 def annex04(
-    month: int, year: int, format: str = "json", session: dict = Depends(require_token)
+    month: int,
+    year: int,
+    import_id: int | None = None,
+    format: str = "json",
+    session: dict = Depends(require_token),
 ):
     if format != "json":
         raise HTTPException(status_code=400, detail="Only JSON format is available")
-    return report_service.annex_04(month, year)
+    return report_service.annex_04(month, year, import_id=import_id)

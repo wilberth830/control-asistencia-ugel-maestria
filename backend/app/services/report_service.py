@@ -12,6 +12,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from app.repositories.biometric_repository import biometric_repository
 from app.repositories.institution_repository import institution_repository
 from app.repositories.oracle import OracleRepositoryError
 from app.services.attendance_service import attendance_service
@@ -36,10 +37,16 @@ MONTH_NAMES = (
 
 class ReportService:
     def annex_03(
-        self, month: int, year: int, institution: dict[str, Any] | None = None
+        self,
+        month: int,
+        year: int,
+        institution: dict[str, Any] | None = None,
+        import_id: int | None = None,
     ) -> dict[str, Any]:
         inst = institution or self._institution()
-        attendance_rows = attendance_service.list_month(month, year)
+        attendance_rows = attendance_service.list_month(
+            month, year, import_id=import_id
+        )
         rows_by_staff: dict[int, list[dict[str, Any]]] = defaultdict(list)
         for row in attendance_rows:
             rows_by_staff[row["staff_member_id"]].append(row)
@@ -63,8 +70,10 @@ class ReportService:
             "rows": rows,
         }
 
-    def annex_04(self, month: int, year: int) -> dict[str, Any]:
-        attendance_rows = attendance_service.list_month(month, year)
+    def annex_04(self, month: int, year: int, import_id: int | None = None) -> dict[str, Any]:
+        attendance_rows = attendance_service.list_month(
+            month, year, import_id=import_id
+        )
         totals = Counter(row["status"] for row in attendance_rows)
         staff_member_ids = {row["staff_member_id"] for row in attendance_rows}
         return {
@@ -82,28 +91,38 @@ class ReportService:
             },
         }
 
-    def monthly_workbook(self, month: int, year: int) -> BytesIO:
+    def monthly_workbook(
+        self, month: int, year: int, import_id: int | None = None
+    ) -> BytesIO:
         if month < 1 or month > 12:
             raise ValueError("invalid_month")
         institution = self._institution()
-        staff_rows = self._staff_rows(month, year)
+        staff_rows = self._staff_rows(month, year, import_id=import_id)
+        file_name = None
+        if import_id is not None:
+            import_row = biometric_repository.get_import(import_id)
+            file_name = import_row["file_name"] if import_row else None
         workbook = Workbook()
         attendance_sheet = workbook.active
         attendance_sheet.title = "ASISTENCIA"
         consolidated_sheet = workbook.create_sheet("REPORTE CONSOLIDADO")
         self._write_attendance_sheet(
-            attendance_sheet, institution, staff_rows, month, year
+            attendance_sheet, institution, staff_rows, month, year, file_name=file_name
         )
         self._write_consolidated_sheet(
-            consolidated_sheet, institution, staff_rows, month, year
+            consolidated_sheet, institution, staff_rows, month, year, file_name=file_name
         )
         output = BytesIO()
         workbook.save(output)
         output.seek(0)
         return output
 
-    def _staff_rows(self, month: int, year: int) -> list[dict[str, Any]]:
-        attendance_rows = attendance_service.list_month(month, year)
+    def _staff_rows(
+        self, month: int, year: int, import_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        attendance_rows = attendance_service.list_month(
+            month, year, import_id=import_id
+        )
         days_by_staff: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
         for item in attendance_rows:
             days_by_staff[item["staff_member_id"]][item["attendance_date"]] = item
@@ -113,7 +132,14 @@ class ReportService:
         return rows
 
     def _write_common_header(
-        self, sheet: Any, institution: dict[str, Any], month: int, year: int, title: str, end_column: int
+        self,
+        sheet: Any,
+        institution: dict[str, Any],
+        month: int,
+        year: int,
+        title: str,
+        end_column: int,
+        file_name: str | None = None,
     ) -> None:
         blue = PatternFill("solid", fgColor="00A1D6")
         thin = Side(style="thin", color="000000")
@@ -145,19 +171,38 @@ class ReportService:
         sheet.cell(4, max(8, end_column - 3), year).font = Font(bold=True, color="FF0000")
         sheet.cell(4, max(8, end_column - 1), "TURNO:").font = Font(bold=True)
         sheet.cell(4, end_column, institution.get("shift_name", "")).font = Font(bold=True, color="FF0000")
-        for row in sheet.iter_rows(min_row=1, max_row=7, min_col=1, max_col=end_column):
+        if file_name:
+            sheet.cell(8, 1, "ARCHIVO DE ASISTENCIA:").font = Font(bold=True)
+            sheet.merge_cells(start_row=8, start_column=2, end_row=8, end_column=min(7, end_column))
+            sheet.cell(8, 2, file_name)
+            footer_max_row = 8
+        else:
+            footer_max_row = 7
+        for row in sheet.iter_rows(min_row=1, max_row=footer_max_row, min_col=1, max_col=end_column):
             for cell in row:
                 cell.border = Border(bottom=thin)
                 cell.alignment = Alignment(vertical="center")
 
     def _write_attendance_sheet(
-        self, sheet: Any, institution: dict[str, Any], staff_rows: list[dict[str, Any]], month: int, year: int
+        self,
+        sheet: Any,
+        institution: dict[str, Any],
+        staff_rows: list[dict[str, Any]],
+        month: int,
+        year: int,
+        file_name: str | None = None,
     ) -> None:
         days = monthrange(year, month)[1]
         first_day_column = 7
         end_column = first_day_column + days - 1
         self._write_common_header(
-            sheet, institution, month, year, "FORMATO 01: REPORTE DE ASISTENCIA DETALLADO", end_column
+            sheet,
+            institution,
+            month,
+            year,
+            "FORMATO 01: REPORTE DE ASISTENCIA DETALLADO",
+            end_column,
+            file_name=file_name,
         )
         blue = PatternFill("solid", fgColor="B7DEE8")
         thin = Side(style="thin", color="000000")
@@ -194,29 +239,42 @@ class ReportService:
         self._format_table(sheet, 9, 11 + max(1, len(staff_rows)), end_column, [5, 12, 34, 16, 16, 16])
 
     def _write_consolidated_sheet(
-        self, sheet: Any, institution: dict[str, Any], staff_rows: list[dict[str, Any]], month: int, year: int
+        self,
+        sheet: Any,
+        institution: dict[str, Any],
+        staff_rows: list[dict[str, Any]],
+        month: int,
+        year: int,
+        file_name: str | None = None,
     ) -> None:
         headers = ["N°", "DNI", "APELLIDOS Y NOMBRES", "CARGO", "CONDICIÓN\nLABORAL", "JORNADA\nLABORAL", "INASISTENCIAS\nJUSTIFICADAS\nDÍAS", "LICENCIAS\nCON GOCE", "LICENCIAS\nSIN GOCE", "LICENCIAS\nDU", "FALTAS\nDÍAS", "TARDANZAS\nMINUTOS (*)", "PERMISOS SG\nHORAS (*)", "PERMISOS SG\nMINUTOS (*)", "HUELGA PARO\nDÍAS", "OBSERVACIONES"]
         end_column = len(headers)
         self._write_common_header(
-            sheet, institution, month, year,
-            "FORMATO 02: REPORTE CONSOLIDADO DE INASISTENCIAS, TARDANZAS Y PERMISOS SIN GOCE DE REMUNERACIÓN", end_column,
+            sheet,
+            institution,
+            month,
+            year,
+            "FORMATO 02: REPORTE CONSOLIDADO DE INASISTENCIAS, TARDANZAS Y PERMISOS SIN GOCE DE REMUNERACIÓN",
+            end_column,
+            file_name=file_name,
         )
         blue = PatternFill("solid", fgColor="B7DEE8")
+        first_header_row = 9 if file_name else 8
         for column, header in enumerate(headers, start=1):
-            cell = sheet.cell(8, column, header)
+            cell = sheet.cell(first_header_row, column, header)
             cell.fill = blue
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         for index, staff in enumerate(staff_rows, start=1):
             status_counts = Counter(item["status"] for item in staff["days"].values())
             late_minutes = sum(item.get("late_minutes", 0) for item in staff["days"].values() if item["status"] == "late")
+            row_index = first_header_row + index
             values = [index, staff["dni"], self._full_name(staff), staff["job_title"], staff.get("employment_status") or "", "", status_counts["justified"], status_counts["leave"], 0, 0, status_counts["absent"], late_minutes, 0, 0, 0, ""]
             for column, value in enumerate(values, start=1):
-                cell = sheet.cell(8 + index, column, value)
+                cell = sheet.cell(row_index, column, value)
                 if column >= 7 and column <= 15:
                     cell.alignment = Alignment(horizontal="center")
-        self._format_table(sheet, 8, 8 + max(1, len(staff_rows)), end_column, [5, 12, 34, 16, 16, 16, 15, 14, 14, 12, 12, 14, 14, 16, 14, 28])
+        self._format_table(sheet, first_header_row, first_header_row + max(1, len(staff_rows)), end_column, [5, 12, 34, 16, 16, 16, 15, 14, 14, 12, 12, 14, 14, 16, 14, 28])
 
     def _format_table(self, sheet: Any, start_row: int, end_row: int, end_column: int, widths: list[int]) -> None:
         thin = Side(style="thin", color="000000")
