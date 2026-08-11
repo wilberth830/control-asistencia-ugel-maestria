@@ -2428,13 +2428,25 @@ function ReportsPage() {
   const [year, setYear] = useState(today.getFullYear());
   const [monthImports, setMonthImports] = useState<BiometricImport[]>([]);
   const [selectedImportId, setSelectedImportId] = useState(0);
-  const [annex03Report, setAnnex03Report] = useState<Annex03Report | null>(null);
-  const [annex04Report, setAnnex04Report] = useState<Annex04Report | null>(null);
-  const [previewSheet, setPreviewSheet] = useState<"attendance" | "consolidated">("attendance");
+  const [annex, setAnnex] = useState<"03" | "04">("03");
   const [loading, setLoading] = useState(false);
+  const [preview, setPreview] = useState<{
+    institution: Record<string, string>;
+    period: { month: number; year: number };
+    rows: Array<{
+      dni: string;
+      full_name: string;
+      days?: Array<{ attendance_date: string; status: string }>;
+      status_counts?: Record<string, number>;
+      late_minutes?: number;
+    }>;
+  } | null>(null);
   const [error, setError] = useState("");
 
-  const selectedImport = monthImports.find((item) => item.id === selectedImportId) || null;
+  const monthNames = [
+    "", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Setiembre", "Octubre", "Noviembre", "Diciembre",
+  ];
 
   useEffect(() => {
     let cancelled = false;
@@ -2458,7 +2470,7 @@ function ReportsPage() {
     };
   }, [month, year]);
 
-  const generatePreview = async () => {
+  const loadPreview = async () => {
     setLoading(true);
     setError("");
     try {
@@ -2468,245 +2480,290 @@ function ReportsPage() {
         format: "json",
         import_id: selectedImportId || undefined,
       } as const;
-      const [attendanceResponse, consolidatedResponse] = await Promise.all([
-        apiClient.get<Annex03Report>("/api/v1/reports/annex-03", { params }),
-        apiClient.get<Annex04Report>("/api/v1/reports/annex-04", { params }),
-      ]);
-      setAnnex03Report(attendanceResponse.data);
-      setAnnex04Report(consolidatedResponse.data);
+      if (annex === "03") {
+        const response = await apiClient.get<Annex03Report>(
+          "/api/v1/reports/annex-03",
+          { params },
+        );
+        const data = response.data;
+        setPreview({
+          institution: data.institution || {},
+          period: data.period || { month, year },
+          rows: (data.rows || []).map((row) => ({
+            dni: row.dni || "",
+            full_name: row.full_name || "",
+            days: row.days || [],
+          })),
+        });
+      } else {
+        const response = await apiClient.get<Annex04Report>(
+          "/api/v1/reports/annex-04",
+          { params },
+        );
+        const data = response.data;
+        setPreview({
+          institution: data.institution || {},
+          period: data.period || { month, year },
+          rows: [
+            {
+              dni: "—",
+              full_name: `Total personal: ${data.staff_count ?? 0}`,
+              status_counts: data.totals || {},
+            },
+          ],
+        });
+      }
     } catch {
       setError("No se pudo generar la vista previa del reporte.");
-      setAnnex03Report(null);
-      setAnnex04Report(null);
+      setPreview(null);
     } finally {
       setLoading(false);
     }
   };
 
-  const downloadExcel = async () => {
+  const exportExcel = async () => {
     setLoading(true);
     setError("");
     try {
       const response = await apiClient.get("/api/v1/reports/monthly-export", {
-        params: {
-          month,
-          year,
-          import_id: selectedImportId || undefined,
-        },
+        params: { month, year, import_id: selectedImportId || undefined },
         responseType: "blob",
       });
-      const url = URL.createObjectURL(response.data as Blob);
+      const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
-      link.download = `asistencia_${year}_${String(month).padStart(2, "0")}.xlsx`;
+      link.setAttribute(
+        "download",
+        `asistencia_${year}_${String(month).padStart(2, "0")}.xlsx`,
+      );
+      document.body.appendChild(link);
       link.click();
-      URL.revokeObjectURL(url);
+      link.remove();
+      window.URL.revokeObjectURL(url);
     } catch {
-      setError("No se pudo descargar el archivo Excel.");
+      setError("No se pudo exportar el Excel");
     } finally {
       setLoading(false);
     }
   };
 
-  const previewRows = (annex03Report?.rows ?? []).map((row, index) => {
-    const counts = row.days.reduce<Record<string, number>>((result, day) => {
-      result[day.status] = (result[day.status] ?? 0) + 1;
-      return result;
-    }, {});
-    const lateMinutes = row.days.reduce(
-      (total, day) => total + (day.status === "late" ? day.late_minutes : 0),
-      0,
-    );
-    return { ...row, index: index + 1, counts, lateMinutes };
-  });
+  const inst = preview?.institution || {};
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const dayCols = Array.from({ length: daysInMonth }, (_, index) => index + 1);
+
+  const statusLetter = (status: string) =>
+    ({ present: "A", late: "T", absent: "F", justified: "J", leave: "L", permission: "P" }[
+      status
+    ] || "");
 
   return (
     <>
       <PageHeader
-        title="Reportes"
-        description="Exportación mensual de asistencia y reporte consolidado"
+        title="Reportes oficiales"
+        description="Anexo 03 y 04 · vista previa estilo oficial · exportar Excel"
       />
-      <section className="report-toolbar card">
-        <div className="card-body report-toolbar-content">
-          <label className="form-field">
-            <span>Asistencia</span>
-            <select value="monthly" disabled>
-              <option value="monthly">Anexo 03 + Anexo 04</option>
-            </select>
-          </label>
-          <label className="form-field">
-            <span>Mes</span>
-            <select
-              onChange={(event) => setMonth(Number(event.target.value))}
-              value={month}
-            >
-              {monthOptions.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
+      <div className="report-layout">
+        <section className="card report-filter">
+          <div className="card-header">Filtros</div>
+          <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <label className="form-field">
+              <span>Tipo de anexo</span>
+              <select
+                value={annex}
+                onChange={(e) => setAnnex(e.target.value as "03" | "04")}
+              >
+                <option value="03">Anexo 03 – Detallado</option>
+                <option value="04">Anexo 04 – Consolidado</option>
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Mes</span>
+              <select value={month} onChange={(e) => setMonth(Number(e.target.value))}>
+                {monthNames.slice(1).map((name, idx) => (
+                  <option key={name} value={idx + 1}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Año</span>
+              <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
+                {Array.from({ length: 7 }, (_, index) => today.getFullYear() + 1 - index).map(
+                  (item) => <option key={item} value={item}>{item}</option>,
+                )}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Archivo</span>
+              <select
+                disabled={!monthImports.length}
+                onChange={(event) => setSelectedImportId(Number(event.target.value))}
+                value={selectedImportId}
+              >
+                <option value={0}>
+                  {monthImports.length
+                    ? "Todos los archivos del mes"
+                    : "Sin archivos para este mes"}
                 </option>
-              ))}
-            </select>
-          </label>
-          <label className="form-field">
-            <span>Año</span>
-            <select
-              onChange={(event) => setYear(Number(event.target.value))}
-              value={year}
-            >
-              {Array.from({ length: 7 }, (_, index) => today.getFullYear() + 1 - index).map(
-                (item) => <option key={item} value={item}>{item}</option>,
-              )}
-            </select>
-          </label>
-          <label className="form-field grow">
-            <span>Archivo</span>
-            <select
-              disabled={!monthImports.length}
-              value={selectedImportId}
-              onChange={(event) => setSelectedImportId(Number(event.target.value))}
-            >
-              <option value={0}>
-                {monthImports.length
-                  ? "Todos los archivos del mes"
-                  : "Sin archivos para este mes"}
-              </option>
-              {monthImports.map((item) => (
-                <option key={item.id} value={item.id}>
-                  #{item.id} · {item.file_name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="report-actions">
+                {monthImports.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    #{item.id} · {item.file_name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button
-              className="btn btn-secondary"
-              disabled={loading || (!monthImports.length && selectedImportId !== 0)}
-              onClick={generatePreview}
+              className="btn btn-primary btn-block"
               type="button"
-            >
-              {loading ? "Generando..." : "Previsualizar"}
-            </button>
-            <button
-              className="btn btn-primary"
               disabled={loading}
-              onClick={downloadExcel}
-              type="button"
+              onClick={loadPreview}
             >
-              Descargar Excel
+              {loading ? "Generando…" : "Generar vista"}
+            </button>
+            <button
+              className="btn btn-secondary btn-block"
+              type="button"
+              disabled={loading}
+              onClick={exportExcel}
+            >
+              Exportar Excel
             </button>
           </div>
-        </div>
-      </section>
-      {error && <div className="alert-danger">{error}</div>}
-      <section className="card report-preview">
-        <div className="card-header">
-          <span>
-            Vista previa
-            {annex03Report
-              ? ` · ${monthOptions.find((item) => item.value === month)?.label} ${year}`
-              : ""}
-          </span>
-          {annex03Report && (
-            <span className="report-institution">
-              {annex03Report.institution.school_name} · {annex03Report.institution.ugel}
-            </span>
-          )}
-        </div>
-        {annex03Report && (
-          <div className="excel-preview-header">
-            <div className="excel-norm">
-              NORMAS PARA EL REGISTRO Y CONTROL DE ASISTENCIA Y SU APLICACIÓN EN LA PLANILLA ÚNICA DE PAGOS
-            </div>
-            <div className="excel-annex">
-              {previewSheet === "attendance" ? "ANEXO 03" : "ANEXO 04"}
-            </div>
-            <div className="excel-title">
-              {previewSheet === "attendance"
-                ? "FORMATO 01: REPORTE DE ASISTENCIA DETALLADO"
-                : "FORMATO 02: REPORTE CONSOLIDADO DE INASISTENCIAS, TARDANZAS Y PERMISOS SIN GOCE DE REMUNERACIÓN"}
-            </div>
-            <div className="excel-data">
-              <strong>UGEL:</strong> {annex03Report.institution.ugel}
-              <strong> · INSTITUCIÓN EDUCATIVA:</strong> {annex03Report.institution.school_name}
-              <strong> · MES:</strong> {monthOptions.find((item) => item.value === month)?.label?.toUpperCase()}
-              <strong> · AÑO:</strong> {year}
-              {selectedImport && (
-                <><strong> · Archivo:</strong> {selectedImport.file_name}</>
+        </section>
+
+        <section className="card report-preview">
+          <div className="card-header">
+            Vista previa · Anexo {annex} · {monthNames[month]} {year}
+          </div>
+          <div className="card-body">
+            {error && <div className="alert-danger">{error}</div>}
+
+            {/* Cabecera estilo oficial */}
+            <div className="annex-official">
+              <div className="annex-legal">
+                NORMAS PARA EL REGISTRO Y CONTROL DE ASISTENCIA Y SU APLICACIÓN EN LA
+                PLANILLA ÚNICA DE PAGOS DE LOS PROFESORES Y AUXILIARES DE EDUCACIÓN
+                (R.S.G. N° 326-2017-MINEDU)
+              </div>
+              <div className="annex-title-bar">
+                {annex === "03"
+                  ? "FORMATO 01: REPORTE DE ASISTENCIA DETALLADO"
+                  : "FORMATO 02: REPORTE CONSOLIDADO DE INASISTENCIAS, TARDANZAS Y PERMISOS"}
+              </div>
+              <div className="annex-meta">
+                <div>
+                  <strong>UGEL:</strong> {inst.ugel || "—"}
+                </div>
+                <div>
+                  <strong>MES:</strong>{" "}
+                  <span className="text-red">{monthNames[month].toUpperCase()}</span>
+                </div>
+                <div>
+                  <strong>AÑO:</strong> <span className="text-red">{year}</span>
+                </div>
+                <div>
+                  <strong>TURNO:</strong>{" "}
+                  <span className="text-red">{inst.shift_name || "—"}</span>
+                </div>
+              </div>
+              <div className="annex-meta">
+                <div>
+                  <strong>INSTITUCIÓN EDUCATIVA:</strong>{" "}
+                  <span className="text-red">{inst.school_name || "—"}</span>
+                </div>
+                <div>
+                  <strong>CÓDIGO MODULAR:</strong>{" "}
+                  <span className="text-red">{inst.modular_code || "—"}</span>
+                </div>
+                <div>
+                  <strong>NIVEL:</strong>{" "}
+                  <span className="text-red">{inst.education_level || "—"}</span>
+                </div>
+              </div>
+
+              {!preview && (
+                <p className="text-muted" style={{ marginTop: 16 }}>
+                  Selecciona filtros y pulsa <strong>Generar vista</strong>.
+                </p>
+              )}
+
+              {preview && annex === "03" && (
+                <div className="table-wrap annex-table" style={{ marginTop: 12 }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>N°</th>
+                        <th>DNI</th>
+                        <th>Apellidos y nombres</th>
+                        {dayCols.map((d) => (
+                          <th key={d}>{d}</th>
+                        ))}
+                        <th>…</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.rows.length === 0 ? (
+                        <tr>
+                          <td colSpan={dayCols.length + 4}>Sin registros</td>
+                        </tr>
+                      ) : (
+                        preview.rows.map((row, idx) => {
+                          const byDate: Record<string, string> = {};
+                          (row.days || []).forEach((d) => {
+                            byDate[d.attendance_date] = statusLetter(d.status);
+                          });
+                          return (
+                            <tr key={`${row.dni}-${idx}`}>
+                              <td>{idx + 1}</td>
+                              <td>{row.dni}</td>
+                              <td style={{ textAlign: "left" }}>{row.full_name}</td>
+                              {dayCols.map((d) => {
+                                const key = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+                                return (
+                                  <td key={d}>{byDate[key] || ""}</td>
+                                );
+                              })}
+                              <td>…</td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {preview && annex === "04" && (
+                <div className="table-wrap annex-table" style={{ marginTop: 12 }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Presentes</th>
+                        <th>Tardanzas</th>
+                        <th>Faltas</th>
+                        <th>Justificadas</th>
+                        <th>Licencias</th>
+                        <th>Permisos</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>{preview.rows[0]?.status_counts?.present ?? 0}</td>
+                        <td>{preview.rows[0]?.status_counts?.late ?? 0}</td>
+                        <td>{preview.rows[0]?.status_counts?.absent ?? 0}</td>
+                        <td>{preview.rows[0]?.status_counts?.justified ?? 0}</td>
+                        <td>{preview.rows[0]?.status_counts?.leave ?? 0}</td>
+                        <td>{preview.rows[0]?.status_counts?.permission ?? 0}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           </div>
-        )}
-        <div className="report-tabs">
-          <button
-            className={previewSheet === "attendance" ? "active" : ""}
-            onClick={() => setPreviewSheet("attendance")}
-            type="button"
-          >
-            Asistencia · Anexo 03
-          </button>
-          <button
-            className={previewSheet === "consolidated" ? "active" : ""}
-            onClick={() => setPreviewSheet("consolidated")}
-            type="button"
-          >
-            Reporte consolidado · Anexo 04
-          </button>
-        </div>
-        {annex03Report ? (
-          previewSheet === "attendance" ? (
-            <DataTable
-              columns={[
-                "N°",
-                "DNI",
-                "Apellidos y nombres",
-                "Asistencia",
-                "Tardanzas",
-                "Faltas",
-                "Justificados",
-              ]}
-              rows={previewRows.map((row) => [
-                String(row.index),
-                row.dni,
-                row.full_name,
-                String(row.counts.present ?? 0),
-                String(row.counts.late ?? 0),
-                String(row.counts.absent ?? 0),
-                String(row.counts.justified ?? 0),
-              ])}
-              emptyText="No hay asistencia registrada para este mes"
-            />
-          ) : annex04Report ? (
-            <DataTable
-              columns={[
-                "Total personal",
-                "Asistencias",
-                "Tardanzas",
-                "Inasistencias",
-                "Justificados",
-                "Licencias",
-                "Permisos",
-              ]}
-              rows={[
-                [
-                  String(annex04Report.staff_count),
-                  String(annex04Report.totals.present),
-                  String(annex04Report.totals.late),
-                  String(annex04Report.totals.absent),
-                  String(annex04Report.totals.justified),
-                  String(annex04Report.totals.leave),
-                  String(annex04Report.totals.permission),
-                ],
-              ]}
-            />
-          ) : (
-            <div className="report-empty">No hay datos de reporte consolidados.</div>
-          )
-        ) : (
-          <div className="report-empty">
-            Selecciona el período y presiona <strong>Previsualizar</strong>.
-          </div>
-        )}
-      </section>
+        </section>
+      </div>
     </>
   );
 }
