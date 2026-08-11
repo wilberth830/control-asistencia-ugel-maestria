@@ -6,6 +6,7 @@ from copy import deepcopy
 from datetime import date
 from typing import Any
 
+from app.core.runtime import use_memory_fallback
 from app.repositories.attendance_day_repository import attendance_day_repository
 from app.repositories.oracle import OracleRepositoryError
 
@@ -52,8 +53,8 @@ class AttendanceService:
                 late_minutes=late_minutes,
                 justification_id=justification_id,
             )
-        except OracleRepositoryError:
-            pass
+        except OracleRepositoryError as exc:
+            use_memory_fallback("attendance upsert", exc)
 
         key = self._key(staff_member_id, parsed_date.isoformat(), biometric_import_id)
         old = self._days.get(key)
@@ -66,6 +67,11 @@ class AttendanceService:
             "status": status,
             "late_minutes": late_minutes,
             "justification_id": justification_id,
+            "status_before_justification": (
+                old.get("status_before_justification", old["status"])
+                if old and justification_id is not None
+                else None
+            ),
         }
         self._days[key] = row
         return deepcopy(row)
@@ -77,21 +83,35 @@ class AttendanceService:
         staff_member_id: int,
         start_date: date,
         end_date: date,
-    ) -> list[dict[str, Any]]:
-        rows = []
-        current = start_date
-        while current <= end_date:
-            rows.append(
-                self.upsert_day(
-                    staff_member_id=staff_member_id,
-                    attendance_date=current.isoformat(),
-                    status="justified",
-                    late_minutes=0,
-                    justification_id=justification_id,
-                )
+        status: str,
+    ) -> int:
+        self._validate(status, 0)
+        try:
+            return attendance_day_repository.apply_justification(
+                justification_id=justification_id,
+                staff_member_id=staff_member_id,
+                start_date=start_date,
+                end_date=end_date,
+                status=status,
             )
-            current = date.fromordinal(current.toordinal() + 1)
-        return rows
+        except OracleRepositoryError as exc:
+            use_memory_fallback("justification attendance apply", exc)
+
+        changed = []
+        for row in self._days.values():
+            attendance_date = date.fromisoformat(str(row["attendance_date"])[:10])
+            if (
+                row["staff_member_id"] == staff_member_id
+                and start_date <= attendance_date <= end_date
+                and row["status"] == "absent"
+                and row.get("justification_id") is None
+            ):
+                row["status_before_justification"] = "absent"
+                row["status"] = status
+                row["late_minutes"] = 0
+                row["justification_id"] = justification_id
+                changed.append(deepcopy(row))
+        return len(changed)
 
     def bulk_upsert_days(self, rows: list[dict[str, Any]]) -> None:
         payload = []
@@ -108,8 +128,8 @@ class AttendanceService:
         try:
             attendance_day_repository.bulk_upsert(payload)
             return
-        except OracleRepositoryError:
-            pass
+        except OracleRepositoryError as exc:
+            use_memory_fallback("attendance bulk upsert", exc)
 
         for row in rows:
             self.upsert_day(
@@ -124,17 +144,25 @@ class AttendanceService:
     def cancel_justification(self, justification_id: int) -> list[dict[str, Any]]:
         try:
             return attendance_day_repository.clear_justification(justification_id)
-        except OracleRepositoryError:
-            pass
+        except OracleRepositoryError as exc:
+            use_memory_fallback("justification attendance rollback", exc)
 
         changed = []
         for row in self._days.values():
             if row.get("justification_id") == justification_id:
-                row["status"] = "absent"
+                row["status"] = row.get("status_before_justification") or "absent"
                 row["late_minutes"] = 0
                 row["justification_id"] = None
+                row["status_before_justification"] = None
                 changed.append(deepcopy(row))
         return changed
+
+    def cancel_import(self, import_id: int) -> None:
+        self._days = {
+            key: row
+            for key, row in self._days.items()
+            if row.get("biometric_import_id") != import_id
+        }
 
     def list_month(
         self,
@@ -153,8 +181,8 @@ class AttendanceService:
             return attendance_day_repository.list_month(
                 month=month, year=year, staff_member_id=staff_member_id
             )
-        except OracleRepositoryError:
-            pass
+        except OracleRepositoryError as exc:
+            use_memory_fallback("attendance list", exc)
 
         prefix = f"{year:04d}-{month:02d}"
         out = []

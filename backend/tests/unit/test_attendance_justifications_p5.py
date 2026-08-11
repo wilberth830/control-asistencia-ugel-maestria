@@ -116,13 +116,30 @@ def test_create_justification_applies_attendance_range(
 ) -> None:
     client = TestClient(app)
 
+    for attendance_date, status in [
+        ("2026-07-10", "absent"),
+        ("2026-07-11", "present"),
+        ("2026-07-12", "absent"),
+    ]:
+        response = client.put(
+            "/api/v1/attendance-records/days",
+            json={
+                "staff_member_id": 1,
+                "attendance_date": attendance_date,
+                "status": status,
+                "late_minutes": 0,
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+
     create_response = client.post(
         "/api/v1/justifications",
         data={
             "staff_member_id": "1",
             "start_date": "2026-07-10",
             "end_date": "2026-07-12",
-            "norm_code": "LIC",
+            "norm_code": "LG",
             "with_pay": "Y",
             "reason": "Licencia aprobada",
         },
@@ -145,21 +162,33 @@ def test_create_justification_applies_attendance_range(
         "2026-07-11",
         "2026-07-12",
     ]
-    assert all(day["status"] == "justified" for day in days)
-    assert all(day["justification_id"] == item["id"] for day in days)
+    assert [day["status"] for day in days] == ["leave", "present", "leave"]
+    assert [day["justification_id"] for day in days] == [item["id"], None, item["id"]]
 
 
 def test_cancel_justification_reverts_attendance_days(
     auth_headers: dict[str, str],
 ) -> None:
     client = TestClient(app)
+    attendance_response = client.put(
+        "/api/v1/attendance-records/days",
+        json={
+            "staff_member_id": 1,
+            "attendance_date": "2026-07-10",
+            "status": "absent",
+            "late_minutes": 0,
+        },
+        headers=auth_headers,
+    )
+    assert attendance_response.status_code == 200
+
     item = client.post(
         "/api/v1/justifications",
         data={
             "staff_member_id": "1",
             "start_date": "2026-07-10",
             "end_date": "2026-07-10",
-            "norm_code": "PER",
+            "norm_code": "P",
             "with_pay": "N",
         },
         headers=auth_headers,
@@ -182,6 +211,80 @@ def test_cancel_justification_reverts_attendance_days(
 
     assert attendance_response.json()[0]["status"] == "absent"
     assert attendance_response.json()[0]["justification_id"] is None
+
+
+def test_create_justification_requires_a_pending_absence(
+    auth_headers: dict[str, str],
+) -> None:
+    response = TestClient(app).post(
+        "/api/v1/justifications",
+        data={
+            "staff_member_id": "1",
+            "start_date": "2026-07-10",
+            "end_date": "2026-07-10",
+            "norm_code": "J",
+            "with_pay": "N",
+            "reason": "Sustento presentado",
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "no_absences_in_range"}
+    assert justification_service.list() == []
+
+
+@pytest.mark.parametrize(
+    ("norm_code", "expected_status", "expected_with_pay"),
+    [
+        ("LG", "leave", "Y"),
+        ("LS", "leave", "N"),
+        ("P", "permission", "N"),
+        ("J", "justified", "N"),
+        ("H", "justified", "N"),
+        ("F", "justified", "N"),
+    ],
+)
+def test_norm_code_determines_attendance_status_and_pay(
+    auth_headers: dict[str, str],
+    norm_code: str,
+    expected_status: str,
+    expected_with_pay: str,
+) -> None:
+    client = TestClient(app)
+    attendance_date = "2026-07-15"
+    assert client.put(
+        "/api/v1/attendance-records/days",
+        json={
+            "staff_member_id": 1,
+            "attendance_date": attendance_date,
+            "status": "absent",
+            "late_minutes": 0,
+        },
+        headers=auth_headers,
+    ).status_code == 200
+
+    response = client.post(
+        "/api/v1/justifications",
+        data={
+            "staff_member_id": "1",
+            "start_date": attendance_date,
+            "end_date": attendance_date,
+            "norm_code": norm_code,
+            "with_pay": "N" if expected_with_pay == "Y" else "Y",
+            "reason": "Aplicación de norma",
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 201
+    assert response.json()["with_pay"] == expected_with_pay
+    day = client.get(
+        "/api/v1/attendance-records",
+        params={"month": 7, "year": 2026, "staff_member_id": 1},
+        headers=auth_headers,
+    ).json()[0]
+    assert day["status"] == expected_status
 
 
 def test_invalid_attendance_status_returns_400(auth_headers: dict[str, str]) -> None:
