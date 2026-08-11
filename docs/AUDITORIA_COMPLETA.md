@@ -7,7 +7,7 @@
 
 ---
 
-## 1. Resumen Ejecutivo (una prueba)
+## 1. Resumen Ejecutivo
 
 | Severidad | Cantidad | Descripción |
 |-----------|----------|-------------|
