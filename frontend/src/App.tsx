@@ -368,35 +368,152 @@ function DashboardPage() {
 
 function StaffPage() {
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
+  const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
+  const [search, setSearch] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
     apiClient
       .get<StaffMember[]>("/api/v1/staff-members", { params: { is_active: "Y" } })
       .then((response) => setStaffMembers(response.data))
-      .catch(() => setStaffMembers([]));
+      .catch(() => {
+        setStaffMembers([]);
+        setError("No se pudo cargar el personal.");
+      });
   }, []);
+
+  const visibleStaff = staffMembers.filter((item) => {
+    const query = search.trim().toLowerCase();
+    return !query || [item.dni, item.last_names, item.first_names, item.job_title]
+      .some((value) => value.toLowerCase().includes(query));
+  });
+
+  const saveStaff = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editingStaff) return;
+    setSaving(true);
+    setError("");
+    try {
+      const response = await apiClient.put<StaffMember>(
+        `/api/v1/staff-members/${editingStaff.id}`,
+        editingStaff,
+      );
+      setStaffMembers((current) =>
+        current.map((item) => item.id === response.data.id ? response.data : item),
+      );
+      setEditingStaff(null);
+      setMessage("Datos del personal actualizados correctamente.");
+    } catch {
+      setError("No se pudieron guardar los cambios. Verifica los datos e inténtalo nuevamente.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateEditingStaff = (field: keyof StaffMember, value: string) => {
+    setEditingStaff((current) => current ? { ...current, [field]: value } : current);
+  };
 
   return (
     <>
       <PageHeader
         title="Personal"
-        description="Registro activo vinculado a la institución educativa"
+        description="Docentes y auxiliares registrados en la institución educativa"
       />
-      <Filters showSearch />
+      <div className="filters staff-filters">
+        <label className="form-field grow">
+          <span>Buscar</span>
+          <input
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="DNI, nombres o apellidos"
+            value={search}
+          />
+        </label>
+      </div>
+      {message && <div className="alert-success">{message}</div>}
+      {error && <div className="alert-danger">{error}</div>}
       <section className="card">
         <div className="card-header">Personal activo</div>
-        <DataTable
-          columns={["DNI", "Apellidos y nombres", "Cargo", "Condición", "Estado"]}
-          rows={staffMembers.map((item) => [
-            item.dni,
-            `${item.last_names}, ${item.first_names}`,
-            item.job_title,
-            item.employment_status ?? "-",
-            item.is_active === "Y" ? "Activo" : "Inactivo",
-          ])}
-          emptyText="Sin personal registrado"
-        />
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>DNI</th>
+                <th>Apellidos y nombres</th>
+                <th>Cargo</th>
+                <th>Condición</th>
+                <th>Estado</th>
+                <th aria-label="Acciones" />
+              </tr>
+            </thead>
+            <tbody>
+              {visibleStaff.length ? visibleStaff.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.dni}</td>
+                  <td>{item.last_names}, {item.first_names}</td>
+                  <td>{item.job_title}</td>
+                  <td>{item.employment_status ?? "-"}</td>
+                  <td><span className="badge badge-success">Activo</span></td>
+                  <td className="staff-actions">
+                    <button
+                      className="btn btn-sm btn-secondary"
+                      onClick={() => { setEditingStaff({ ...item }); setError(""); setMessage(""); }}
+                      type="button"
+                    >
+                      Editar
+                    </button>
+                  </td>
+                </tr>
+              )) : (
+                <tr><td colSpan={6} className="empty-cell">Sin personal registrado</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
+      {editingStaff && (
+        <div className="modal-backdrop" role="presentation">
+          <section aria-labelledby="edit-staff-title" aria-modal="true" className="modal-card" role="dialog">
+            <div className="modal-header">
+              <div>
+                <h2 id="edit-staff-title">Editar personal</h2>
+                <p>Actualiza los datos del registro seleccionado.</p>
+              </div>
+              <button aria-label="Cerrar" className="modal-close" onClick={() => setEditingStaff(null)} type="button">×</button>
+            </div>
+            <form onSubmit={saveStaff}>
+              <div className="modal-body form-grid staff-form-grid">
+                <label className="form-field">
+                  <span>DNI</span>
+                  <input inputMode="numeric" maxLength={8} onChange={(event) => updateEditingStaff("dni", event.target.value)} pattern="[0-9]{8}" required value={editingStaff.dni} />
+                </label>
+                <label className="form-field">
+                  <span>Cargo</span>
+                  <input onChange={(event) => updateEditingStaff("job_title", event.target.value)} required value={editingStaff.job_title} />
+                </label>
+                <label className="form-field">
+                  <span>Apellidos</span>
+                  <input onChange={(event) => updateEditingStaff("last_names", event.target.value)} required value={editingStaff.last_names} />
+                </label>
+                <label className="form-field">
+                  <span>Nombres</span>
+                  <input onChange={(event) => updateEditingStaff("first_names", event.target.value)} required value={editingStaff.first_names} />
+                </label>
+                <label className="form-field">
+                  <span>Condición</span>
+                  <input onChange={(event) => updateEditingStaff("employment_status", event.target.value)} value={editingStaff.employment_status ?? ""} />
+                </label>
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-secondary" disabled={saving} onClick={() => setEditingStaff(null)} type="button">Cancelar</button>
+                <button className="btn btn-primary" disabled={saving} type="submit">{saving ? "Guardando..." : "Guardar cambios"}</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
     </>
   );
 }

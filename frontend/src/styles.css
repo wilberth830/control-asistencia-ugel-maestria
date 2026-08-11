@@ -427,6 +427,94 @@ select {
   display: flex;
 }
 
+.staff-filters {
+  justify-content: space-between;
+}
+
+.staff-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.empty-cell {
+  color: var(--text-muted);
+  padding: 24px;
+  text-align: center;
+}
+
+.modal-backdrop {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.48);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 16px;
+  position: fixed;
+  z-index: 100;
+}
+
+.modal-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.24);
+  max-width: 620px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.modal-header {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  padding: 18px 20px;
+}
+
+.modal-header h2 {
+  font-size: 16px;
+  margin: 0 0 3px;
+}
+
+.modal-header p {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.modal-close {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 24px;
+  padding: 2px 6px;
+}
+
+.modal-close:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.modal-body {
+  padding: 20px;
+}
+
+.staff-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.modal-footer {
+  background: #fafbfc;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 12px 20px;
+}
+
 .kpi-grid {
   display: grid;
   gap: 12px;
