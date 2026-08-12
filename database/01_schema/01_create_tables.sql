@@ -320,7 +320,8 @@ BEGIN
     drop_constraint_if_exists('uk_ad_staff_date', 'ALTER TABLE attendance_day DROP CONSTRAINT uk_ad_staff_date');
     add_constraint_if_missing('uk_ad_staff_date_import', 'ALTER TABLE attendance_day ADD CONSTRAINT uk_ad_staff_date_import UNIQUE (staff_member_id, attendance_date, biometric_import_id)');
     add_constraint_if_missing('ck_ad_late', 'ALTER TABLE attendance_day ADD CONSTRAINT ck_ad_late CHECK (late_minutes >= 0)');
-    add_constraint_if_missing('ck_ad_status', q'[ALTER TABLE attendance_day ADD CONSTRAINT ck_ad_status CHECK (status IN ('present', 'late', 'absent', 'justified', 'leave', 'permission'))]');
+    drop_constraint_if_exists('ck_ad_status', 'ALTER TABLE attendance_day DROP CONSTRAINT ck_ad_status');
+    add_constraint_if_missing('ck_ad_status', q'[ALTER TABLE attendance_day ADD CONSTRAINT ck_ad_status CHECK (status IN ('no_record', 'present', 'late', 'absent', 'justified', 'leave', 'unpaid_leave', 'permission', 'strike', 'holiday'))]');
 
     add_primary_key_if_missing('audit_log', 'pk_audit_log', 'ALTER TABLE audit_log ADD CONSTRAINT pk_audit_log PRIMARY KEY (id)');
     add_constraint_if_missing('fk_audit_user', 'ALTER TABLE audit_log ADD CONSTRAINT fk_audit_user FOREIGN KEY (user_account_id) REFERENCES user_account (id)');

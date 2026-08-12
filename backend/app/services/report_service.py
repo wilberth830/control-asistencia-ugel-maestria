@@ -161,7 +161,11 @@ class ReportService:
                 "absent": totals["absent"],
                 "justified": totals["justified"],
                 "leave": totals["leave"],
+                "unpaid_leave": totals["unpaid_leave"],
                 "permission": totals["permission"],
+                "strike": totals["strike"],
+                "holiday": totals["holiday"],
+                "no_record": totals["no_record"],
             },
         }
 
@@ -460,8 +464,9 @@ class ReportService:
 
         data0 = wr + 1
         codes = {
-            "present": "A", "late": "T", "absent": "F",
-            "justified": "J", "leave": "L", "permission": "P",
+            "no_record": "-", "present": "A", "late": "T", "absent": "I",
+            "justified": "J", "leave": "J", "unpaid_leave": "LS",
+            "permission": "P", "strike": "H", "holiday": "F",
         }
         for i, staff in enumerate(staff_rows, 1):
             row = data0 + i - 1
@@ -584,10 +589,10 @@ class ReportService:
                 "",
                 counts.get("justified", 0),
                 counts.get("leave", 0),
-                0, 0,
+                counts.get("unpaid_leave", 0), 0,
                 counts.get("absent", 0),
                 late_min,
-                0, 0, 0, "",
+                0, 0, counts.get("strike", 0), "",
             ]
             for col, v in enumerate(vals, 1):
                 cell = sheet.cell(row, col, v)
