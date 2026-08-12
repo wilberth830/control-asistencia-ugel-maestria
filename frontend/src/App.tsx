@@ -2597,6 +2597,7 @@ function ReportsPage() {
   const today = new Date();
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [year, setYear] = useState(today.getFullYear());
+  const [allImports, setAllImports] = useState<BiometricImport[]>([]);
   const [monthImports, setMonthImports] = useState<BiometricImport[]>([]);
   const [selectedImportId, setSelectedImportId] = useState(0);
   const [annex, setAnnex] = useState<"03" | "04">("03");
@@ -2637,27 +2638,39 @@ function ReportsPage() {
     }));
   };
 
+  // Load all confirmed imports once, then derive available months/years
   useEffect(() => {
     let cancelled = false;
     apiClient
       .get<BiometricImport[]>("/api/v1/biometric-imports", {
-        params: { status: "confirmed", month, year },
+        params: { status: "confirmed" },
       })
       .then((response) => {
         if (cancelled) return;
-        setMonthImports(response.data);
-        setSelectedImportId(0);
+        const imports = sortAttendanceImports(response.data);
+        setAllImports(imports);
       })
       .catch(() => {
         if (cancelled) return;
         setError("No se pudieron cargar los archivos de asistencia.");
-        setMonthImports([]);
-        setSelectedImportId(0);
+        setAllImports([]);
       });
     return () => {
       cancelled = true;
     };
-  }, [month, year]);
+  }, []);
+
+  // Derive imports for selected month/year from `allImports`
+  useEffect(() => {
+    const importsForMonth = allImports.filter((item) =>
+      importTouchesPeriod(item, month, year),
+    );
+    const nextImportId = importsForMonth.some((item) => item.id === selectedImportId)
+      ? selectedImportId
+      : importsForMonth[0]?.id ?? 0;
+    setMonthImports(importsForMonth);
+    setSelectedImportId(nextImportId);
+  }, [allImports, month, year]);
 
   const loadPreview = async () => {
     setLoading(true);
@@ -2766,6 +2779,9 @@ function ReportsPage() {
       absent: "I",
     }[status] || "");
 
+  const availableYears = yearsFromImports(allImports, year);
+  const availableMonths = monthsFromImports(allImports, year, month);
+
   return (
     <>
       <PageHeader
@@ -2785,17 +2801,26 @@ function ReportsPage() {
           <label className="form-field">
             <span>Mes</span>
             <select value={month} onChange={(e) => setMonth(Number(e.target.value))}>
-              {monthNames.slice(1).map((name, idx) => (
-                <option key={name} value={idx + 1}>{name}</option>
+              {availableMonths.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
               ))}
             </select>
           </label>
           <label className="form-field">
             <span>Año</span>
-            <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
-              {Array.from({ length: 7 }, (_, index) => today.getFullYear() + 1 - index).map(
-                (item) => <option key={item} value={item}>{item}</option>,
-              )}
+            <select
+              value={year}
+              onChange={(e) => {
+                const nextYear = Number(e.target.value);
+                // pick a month that exists in the selected year
+                const nextMonth = monthsFromImports(allImports, nextYear, month)[0].value;
+                setYear(nextYear);
+                setMonth(nextMonth);
+              }}
+            >
+              {availableYears.map((item) => (
+                <option key={item} value={item}>{item}</option>
+              ))}
             </select>
           </label>
           <label className="form-field">
