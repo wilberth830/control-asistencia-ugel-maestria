@@ -185,8 +185,16 @@ class JustificationService:
             raise JustificationValidationError("invalid_date") from exc
 
     def _attendance_status(self, norm_code: str) -> str:
-        if norm_code in {"LG", "LS", "LIC"}:
+        if norm_code == "LS":
+            return "unpaid_leave"
+        if norm_code in {"LG", "LIC"}:
             return "leave"
+        if norm_code == "J":
+            return "justified"
+        if norm_code == "H":
+            return "strike"
+        if norm_code == "F":
+            return "holiday"
         if norm_code in {"P", "PER"}:
             return "permission"
         return "justified"

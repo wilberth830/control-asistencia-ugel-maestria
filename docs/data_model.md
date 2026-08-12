@@ -47,8 +47,8 @@ id PK · mark_id FK · issue_type · description · status pending|reviewed|corr
 id PK · staff_member_id FK · start_date · end_date · norm_code · with_pay Y/N · reason · support_file_path · registered_by_id · registered_at · status active|cancelled
 
 ### attendance_day
-id PK · staff_member_id FK · attendance_date · status present|late|absent|justified|leave|permission · late_minutes ≥0 · justification_id FK NULL  
-UNIQUE (staff_member_id, attendance_date)
+id PK · staff_member_id FK · biometric_import_id FK NULL · attendance_date · status no_record|present|late|absent|justified|leave|unpaid_leave|permission|strike|holiday · late_minutes ≥0 · justification_id FK NULL
+UNIQUE (staff_member_id, attendance_date, biometric_import_id)
 
 ### audit_log
 id PK · user_account_id FK · entity_name · entity_id · action_name · old_value · new_value · created_at

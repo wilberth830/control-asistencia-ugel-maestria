@@ -11,12 +11,16 @@ from app.repositories.attendance_day_repository import attendance_day_repository
 from app.repositories.oracle import OracleRepositoryError
 
 VALID_ATTENDANCE_STATUSES = {
+    "no_record",
     "present",
     "late",
     "absent",
     "justified",
     "leave",
+    "unpaid_leave",
     "permission",
+    "strike",
+    "holiday",
 }
 
 
@@ -43,6 +47,7 @@ class AttendanceService:
         biometric_import_id: int | None = None,
     ) -> dict[str, Any]:
         self._validate(status, late_minutes)
+        late_minutes = late_minutes if status == "late" else 0
         parsed_date = self._parse_date(attendance_date)
         try:
             return attendance_day_repository.upsert(
@@ -117,11 +122,14 @@ class AttendanceService:
         payload = []
         for row in rows:
             self._validate(row["status"], row.get("late_minutes", 0))
+            normalized_late_minutes = (
+                row.get("late_minutes", 0) if row["status"] == "late" else 0
+            )
             payload.append(
                 {
                     **row,
                     "attendance_date": self._parse_date(row["attendance_date"]),
-                    "late_minutes": row.get("late_minutes", 0),
+                    "late_minutes": normalized_late_minutes,
                     "justification_id": row.get("justification_id"),
                 }
             )
@@ -136,7 +144,9 @@ class AttendanceService:
                 staff_member_id=row["staff_member_id"],
                 attendance_date=row["attendance_date"],
                 status=row["status"],
-                late_minutes=row.get("late_minutes", 0),
+                late_minutes=(
+                    row.get("late_minutes", 0) if row["status"] == "late" else 0
+                ),
                 justification_id=row.get("justification_id"),
                 biometric_import_id=row.get("biometric_import_id"),
             )

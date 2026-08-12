@@ -3,13 +3,22 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import settings
 from app.main import app
-from app.services.attendance_service import attendance_service
-from app.services.justification_service import justification_service
+from app.repositories.attendance_day_repository import attendance_day_repository
+from app.services.attendance_service import AttendanceService, attendance_service
+from app.services.justification_service import (
+    JustificationService,
+    justification_service,
+)
 
 
 @pytest.fixture(autouse=True)
-def reset_attendance_data() -> None:
+def reset_attendance_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "oracle_user", "")
+    monkeypatch.setattr(settings, "oracle_password", "")
+    monkeypatch.setattr(settings, "oracle_dsn", "")
+    monkeypatch.setattr(settings, "app_allow_memory_data", True)
     attendance_service.reset()
     justification_service.reset()
 
@@ -238,11 +247,11 @@ def test_create_justification_requires_a_pending_absence(
     ("norm_code", "expected_status", "expected_with_pay"),
     [
         ("LG", "leave", "Y"),
-        ("LS", "leave", "N"),
+        ("LS", "unpaid_leave", "N"),
         ("P", "permission", "N"),
         ("J", "justified", "N"),
-        ("H", "justified", "N"),
-        ("F", "justified", "N"),
+        ("H", "strike", "N"),
+        ("F", "holiday", "N"),
     ],
 )
 def test_norm_code_determines_attendance_status_and_pay(
@@ -300,3 +309,56 @@ def test_invalid_attendance_status_returns_400(auth_headers: dict[str, str]) -> 
 
     assert response.status_code == 400
     assert response.json() == {"detail": "Invalid attendance day"}
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        "no_record",
+        "present",
+        "late",
+        "absent",
+        "justified",
+        "unpaid_leave",
+        "permission",
+        "strike",
+        "holiday",
+    ],
+)
+def test_manual_attendance_statuses_and_late_minutes(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    def upsert_stub(**data):
+        return {
+            "id": 1,
+            **data,
+            "attendance_date": data["attendance_date"].isoformat(),
+        }
+
+    monkeypatch.setattr(attendance_day_repository, "upsert", upsert_stub)
+    row = AttendanceService().upsert_day(
+        staff_member_id=1,
+        attendance_date="2026-07-03",
+        status=status,
+        late_minutes=12,
+    )
+
+    assert row["status"] == status
+    assert row["late_minutes"] == (12 if status == "late" else 0)
+
+
+@pytest.mark.parametrize(
+    ("norm_code", "expected_status"),
+    [
+        ("LG", "leave"),
+        ("LS", "unpaid_leave"),
+        ("P", "permission"),
+        ("J", "justified"),
+        ("H", "strike"),
+        ("F", "holiday"),
+    ],
+)
+def test_norm_codes_map_to_distinct_attendance_statuses(
+    norm_code: str, expected_status: str
+) -> None:
+    assert JustificationService()._attendance_status(norm_code) == expected_status

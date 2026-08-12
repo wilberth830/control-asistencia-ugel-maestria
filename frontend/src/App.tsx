@@ -1665,8 +1665,8 @@ function AttendancePage() {
 
   const selectDay = (row: AttendanceDay) => {
     setSelectedDay(row);
-    setSelectedStatus(row.status);
-    setLateMinutes(row.late_minutes);
+    setSelectedStatus(row.status === "leave" ? "justified" : row.status);
+    setLateMinutes(row.status === "late" ? row.late_minutes : 0);
     setLockedDayKey("");
     setMessage("");
     setError("");
@@ -1675,6 +1675,10 @@ function AttendancePage() {
   const saveDay = async () => {
     if (!selectedDay) return;
     const dayKey = `${selectedDay.staff_member_id}-${selectedDay.attendance_date}`;
+    const statusForSave =
+      selectedStatus === "justified" && selectedDay.status === "leave"
+        ? "leave"
+        : selectedStatus;
     setSavingDay(true);
     setError("");
     setMessage("");
@@ -1686,8 +1690,8 @@ function AttendancePage() {
           biometric_import_id:
             selectedDay.biometric_import_id ?? (selectedImportId || null),
           attendance_date: selectedDay.attendance_date,
-          status: selectedStatus,
-          late_minutes: lateMinutes,
+          status: statusForSave,
+          late_minutes: statusForSave === "late" ? lateMinutes : 0,
           justification_id: selectedDay.justification_id,
         },
       );
@@ -1849,7 +1853,11 @@ function AttendancePage() {
               <span>Estado</span>
               <select
                 disabled={fieldsLocked}
-                onChange={(event) => setSelectedStatus(event.target.value)}
+                onChange={(event) => {
+                  const nextStatus = event.target.value;
+                  setSelectedStatus(nextStatus);
+                  if (nextStatus !== "late") setLateMinutes(0);
+                }}
                 value={selectedStatus}
               >
                 {attendanceStatuses.map((status) => (
@@ -1859,16 +1867,18 @@ function AttendancePage() {
                 ))}
               </select>
             </label>
-            <label className="form-field">
-              <span>Minutos tardanza</span>
-              <input
-                disabled={fieldsLocked}
-                min="0"
-                onChange={(event) => setLateMinutes(Number(event.target.value))}
-                type="number"
-                value={lateMinutes}
-              />
-            </label>
+            {selectedStatus === "late" && (
+              <label className="form-field">
+                <span>Minutos tardanza</span>
+                <input
+                  disabled={fieldsLocked}
+                  min="0"
+                  onChange={(event) => setLateMinutes(Number(event.target.value))}
+                  type="number"
+                  value={lateMinutes}
+                />
+              </label>
+            )}
             <button
               className="btn btn-secondary"
               disabled={!selectedDay || savingDay || lockedDayKey === selectedDayKey}
@@ -2629,9 +2639,18 @@ function ReportsPage() {
   const daysInMonth = new Date(year, month, 0).getDate();
   const allDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
   const statusLetter = (status: string) =>
-    ({ present: "A", late: "T", absent: "F", justified: "J", leave: "L", permission: "P" }[
-      status
-    ] || "");
+    ({
+      no_record: "-",
+      present: "A",
+      late: "T",
+      justified: "J",
+      leave: "J",
+      unpaid_leave: "LS",
+      permission: "P",
+      strike: "H",
+      holiday: "F",
+      absent: "I",
+    }[status] || "");
 
   return (
     <>
@@ -3066,16 +3085,22 @@ const statusLabels = [
   { key: "absent", label: "Inasistencia", className: "danger" },
   { key: "justified", label: "Justificado", className: "info" },
   { key: "leave", label: "Licencia", className: "violet" },
+  { key: "unpaid_leave", label: "Licencia sin goce", className: "violet" },
   { key: "permission", label: "Permiso", className: "muted" },
+  { key: "strike", label: "Huelga / Paro", className: "danger" },
+  { key: "holiday", label: "Feriado", className: "info" },
 ];
 
 const attendanceStatuses = [
-  { value: "present", label: "Asistencia" },
-  { value: "late", label: "Tardanza" },
-  { value: "absent", label: "Inasistencia" },
-  { value: "justified", label: "Justificado" },
-  { value: "leave", label: "Licencia" },
-  { value: "permission", label: "Permiso" },
+  { value: "no_record", label: "Sin registro (-)" },
+  { value: "present", label: "A - Asistencia (Puntual)" },
+  { value: "late", label: "T - Tardanza" },
+  { value: "justified", label: "J - Justificada / Licencia con Goce" },
+  { value: "unpaid_leave", label: "LS - Licencia sin Goce" },
+  { value: "permission", label: "P - Permiso sin Goce" },
+  { value: "strike", label: "H - Huelga / Paro" },
+  { value: "holiday", label: "F - Feriado" },
+  { value: "absent", label: "I - Inasistencia" },
 ];
 
 const monthOptions = [
@@ -3156,12 +3181,16 @@ function markTypeText(markType: string) {
 
 function attendanceStatusShort(status: string) {
   const labels: Record<string, string> = {
+    no_record: "-",
     present: "A",
     late: "T",
-    absent: "F",
     justified: "J",
-    leave: "L",
+    leave: "J",
+    unpaid_leave: "LS",
     permission: "P",
+    strike: "H",
+    holiday: "F",
+    absent: "I",
   };
   return labels[status] ?? status.slice(0, 1).toUpperCase();
 }

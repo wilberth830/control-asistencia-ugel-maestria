@@ -27,7 +27,10 @@ class DashboardService:
                 "absent": status_counts["absent"],
                 "justified": status_counts["justified"],
                 "leave": status_counts["leave"],
+                "unpaid_leave": status_counts["unpaid_leave"],
                 "permission": status_counts["permission"],
+                "strike": status_counts["strike"],
+                "holiday": status_counts["holiday"],
             },
             "recent_imports": [
                 {

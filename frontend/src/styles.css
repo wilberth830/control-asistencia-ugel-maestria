@@ -927,9 +927,21 @@ tbody tr:last-child td {
 
 .day-cell.justified,
 .day-cell.leave,
-.day-cell.permission {
+.day-cell.unpaid_leave,
+.day-cell.permission,
+.day-cell.holiday {
   background: var(--info-bg);
   color: var(--info);
+}
+
+.day-cell.strike {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.day-cell.no_record {
+  background: var(--bg);
+  color: var(--text-muted);
 }
 
 .day-empty {
