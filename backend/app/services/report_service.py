@@ -1,8 +1,4 @@
-"""TEC-D09 + TEC-D12 — annex reports (formato oficial UGEL).
-
-Solo generación visual del Excel. Endpoints y lógica de datos intactos.
-Soporta override de cabecera (institution_override) para editar antes de exportar.
-"""
+"""TEC-D09 + TEC-D12 — annex reports (replicación exacta de formato UGEL San Román)."""
 
 from __future__ import annotations
 
@@ -27,10 +23,10 @@ from app.services.staff_member_service import (
 
 DEMO_INSTITUTION = {
     "ugel": "SAN ROMAN",
-    "school_name": "IE Demo CHIQUISTRUKIS",
-    "modular_code": "1234567",
-    "education_level": "Secundaria",
-    "shift_name": "Manana",
+    "school_name": "Nombre de IE",
+    "modular_code": "Codigo modular",
+    "education_level": "Nivel / Modalidad",
+    "shift_name": "Turno_of",
     "address": "Direccion de IE",
     "department": "PUNO",
     "province": "SAN ROMAN",
@@ -49,35 +45,72 @@ LEGAL_HEADER = (
     "(R.S.G. N 326-2017-MINEDU)"
 )
 
-FILL_TITLE = PatternFill("solid", fgColor="0070C0")
+FILL_TITLE = PatternFill("solid", fgColor="008BCE")
 FILL_HEADER = PatternFill("solid", fgColor="BDD7EE")
-FILL_ALT = PatternFill("solid", fgColor="F2F2F2")
-FONT_BLACK_BOLD = Font(bold=True, size=9, name="Calibri")
-FONT_RED_BOLD = Font(bold=True, color="C00000", size=10, name="Calibri")
-FONT_TITLE = Font(bold=True, color="FFFFFF", size=12, name="Calibri")
-FONT_NORMAL = Font(size=9, name="Calibri")
-FONT_SMALL = Font(size=8, name="Calibri")
-THIN = Side(style="thin", color="000000")
-THIN_BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+FILL_SUB = PatternFill("solid", fgColor="D6EAF8")
+FILL_WEEKEND = PatternFill("solid", fgColor="FCE4D6")
+FONT_BLACK_BOLD = Font(bold=True, size=8, name="Calibri")
+FONT_RED_BOLD = Font(bold=True, color="C00000", size=9, name="Calibri")
+FONT_RED_WEEKEND = Font(bold=True, color="C00000", size=7.5, name="Calibri")
+FONT_TITLE = Font(bold=True, color="FFFFFF", size=10, name="Calibri")
+FONT_NORMAL = Font(size=8, name="Calibri")
+FONT_TINY = Font(size=7.5, name="Calibri")
+THIN_BLACK = Side(style="thin", color="000000")
+BORDER_THIN = Border(left=THIN_BLACK, right=THIN_BLACK, top=THIN_BLACK, bottom=THIN_BLACK)
 CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
 LEFT = Alignment(horizontal="left", vertical="center", wrap_text=True)
+NOWRAP_LEFT = Alignment(horizontal="left", vertical="center", wrap_text=False)
 
 
 def _safe(value: Any, default: str = "") -> str:
-    """Normaliza texto para Excel (evita caracteres problemáticos)."""
     if value is None:
         return default
     text = str(value)
-    # Sustituciones seguras para ñ/tildes en entornos que fallan encoding
     replacements = {
-        "ñ": "n", "Ñ": "N",
-        "á": "a", "é": "e", "í": "i", "ó": "o", "ú": "u",
+        "Ã±": "n", "Ã‘": "N", "Ã¡": "a", "Ã©": "e", "Ã­": "i", "Ã³": "o", "Ãº": "u",
+        "ñ": "n", "Ñ": "N", "á": "a", "é": "e", "í": "i", "ó": "o", "ú": "u",
         "Á": "A", "É": "E", "Í": "I", "Ó": "O", "Ú": "U",
-        "ü": "u", "Ü": "U",
     }
     for src, dst in replacements.items():
         text = text.replace(src, dst)
     return text
+
+
+def _segments(end_col: int, n: int) -> list[tuple[int, int]]:
+    """Divide 1..end_col en n segmentos proporcionales (el ultimo absorbe el resto)."""
+    base = end_col // n
+    segs = []
+    start = 1
+    for i in range(n):
+        width = base if i < n - 1 else end_col - start + 1
+        segs.append((start, start + width - 1))
+        start += width
+    return segs
+
+
+def _place_pair(
+    sheet: Any,
+    row: int,
+    start_col: int,
+    end_col: int,
+    label: str,
+    value: str,
+    label_width: int = 2,
+) -> None:
+    """Coloca un par 'ETIQUETA: valor' dentro de [start_col, end_col], fusionando ambas partes."""
+    label_end = min(start_col + label_width - 1, max(start_col, end_col - 1))
+    if label_end > start_col:
+        sheet.merge_cells(start_row=row, start_column=start_col, end_row=row, end_column=label_end)
+    c = sheet.cell(row, start_col, label)
+    c.font = FONT_BLACK_BOLD
+    c.alignment = NOWRAP_LEFT
+    value_start = label_end + 1
+    if value_start <= end_col:
+        if end_col > value_start:
+            sheet.merge_cells(start_row=row, start_column=value_start, end_row=row, end_column=end_col)
+        v = sheet.cell(row, value_start, value)
+        v.font = FONT_RED_BOLD
+        v.alignment = NOWRAP_LEFT
 
 
 class ReportService:
@@ -89,25 +122,24 @@ class ReportService:
         import_id: int | None = None,
     ) -> dict[str, Any]:
         inst = institution or self._institution()
-        attendance_rows = attendance_service.list_month(
-            month, year, import_id=import_id
-        )
-        rows_by_staff: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        attendance_rows = attendance_service.list_month(month, year, import_id=import_id)
+        days_by_staff: dict[int, list[dict[str, Any]]] = defaultdict(list)
         for row in attendance_rows:
-            rows_by_staff[row["staff_member_id"]].append(row)
-
+            days_by_staff[row["staff_member_id"]].append(row)
         rows = []
-        for staff_member_id, days in sorted(rows_by_staff.items()):
-            staff_member = self._staff_member(staff_member_id)
+        # Todo personal activo (inactivos fuera). Sin marcaciones => days vacio.
+        for staff in staff_member_service.list(is_active="Y"):
+            days = days_by_staff.get(staff["id"], [])
             rows.append(
                 {
-                    "staff_member_id": staff_member_id,
-                    "dni": staff_member.get("dni"),
-                    "full_name": self._full_name(staff_member),
+                    "staff_member_id": staff["id"],
+                    "dni": staff.get("dni"),
+                    "full_name": self._full_name(staff),
+                    "job_title": staff.get("job_title"),
+                    "employment_status": staff.get("employment_status"),
                     "days": sorted(days, key=lambda day: day["attendance_date"]),
                 }
             )
-
         return {
             "institution": inst,
             "period": {"month": month, "year": year},
@@ -116,9 +148,7 @@ class ReportService:
         }
 
     def annex_04(self, month: int, year: int, import_id: int | None = None) -> dict[str, Any]:
-        attendance_rows = attendance_service.list_month(
-            month, year, import_id=import_id
-        )
+        attendance_rows = attendance_service.list_month(month, year, import_id=import_id)
         totals = Counter(row["status"] for row in attendance_rows)
         staff_member_ids = {row["staff_member_id"] for row in attendance_rows}
         return {
@@ -147,7 +177,6 @@ class ReportService:
             raise ValueError("invalid_month")
         institution = {**self._institution()}
         if institution_override:
-            # Solo campos de cabecera permitidos
             for key in (
                 "ugel", "school_name", "modular_code", "education_level",
                 "shift_name", "address", "department", "province", "district",
@@ -156,26 +185,19 @@ class ReportService:
                     institution[key] = institution_override[key]
         staff_rows = self._staff_rows(month, year, import_id=import_id)
         workbook = Workbook()
-        attendance_sheet = workbook.active
-        attendance_sheet.title = "Anexo 03 - Asistencia"
-        consolidated_sheet = workbook.create_sheet("Anexo 04 - Consolidado")
-        self._write_attendance_sheet(
-            attendance_sheet, institution, staff_rows, month, year
-        )
-        self._write_consolidated_sheet(
-            consolidated_sheet, institution, staff_rows, month, year
-        )
+        sh3 = workbook.active
+        sh3.title = "ASISTENCIA"
+        sh4 = workbook.create_sheet("REPORTE CONSOLIDADO")
+        self._write_attendance_sheet(sh3, institution, staff_rows, month, year)
+        self._write_consolidated_sheet(sh4, institution, staff_rows, month, year)
         output = BytesIO()
         workbook.save(output)
         output.seek(0)
         return output
 
-    def _staff_rows(
-        self, month: int, year: int, import_id: int | None = None
-    ) -> list[dict[str, Any]]:
-        attendance_rows = attendance_service.list_month(
-            month, year, import_id=import_id
-        )
+    def _staff_rows(self, month: int, year: int, import_id: int | None = None) -> list[dict[str, Any]]:
+        """Todo el personal activo. Sin marcaciones del mes = celdas vacias."""
+        attendance_rows = attendance_service.list_month(month, year, import_id=import_id)
         days_by_staff: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
         for item in attendance_rows:
             days_by_staff[item["staff_member_id"]][item["attendance_date"]] = item
@@ -184,92 +206,200 @@ class ReportService:
             rows.append({**staff, "days": days_by_staff.get(staff["id"], {})})
         return rows
 
-    def _write_official_header(
+    def _header_annex03(
         self,
         sheet: Any,
         institution: dict[str, Any],
         month: int,
         year: int,
-        annex_label: str,
-        title: str,
         end_column: int,
     ) -> int:
+        """Cabecera Anexo 03 con columnas fijas pedidas:
+
+        Labels A-B valores C-F  |  MES/LUGAR/DEP G-J valores K-P
+        ANO/PROV Q-S valores T-Y  |  TURNO/DIS AA-AC valores AD-AH
+        """
         ugel = _safe(institution.get("ugel"))
         school = _safe(institution.get("school_name"))
         level = _safe(institution.get("education_level"))
         modular = _safe(institution.get("modular_code"))
         address = _safe(institution.get("address") or institution.get("lugar"))
-        department = _safe(
-            institution.get("department") or institution.get("departamento") or "PUNO"
-        )
-        province = _safe(
-            institution.get("province") or institution.get("provincia")
-        )
-        district = _safe(
-            institution.get("district") or institution.get("distrito")
-        )
+        department = _safe(institution.get("department") or "PUNO")
+        province = _safe(institution.get("province"))
+        district = _safe(institution.get("district"))
         shift = _safe(institution.get("shift_name"))
 
-        # Fila 1 — texto legal
+        # Asegurar ancho minimo para llegar a AH (col 34)
+        end_column = max(end_column, 34)
+
         sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_column)
-        cell = sheet.cell(1, 1, LEGAL_HEADER)
-        cell.font = Font(bold=True, size=8, name="Calibri")
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        sheet.row_dimensions[1].height = 26
+        c = sheet.cell(1, 1, LEGAL_HEADER)
+        c.font = Font(bold=True, size=7, name="Calibri")
+        c.alignment = CENTER
+        sheet.row_dimensions[1].height = 20
 
-        # Fila 2 — ANEXO
         sheet.merge_cells(start_row=2, start_column=1, end_row=2, end_column=end_column)
-        cell = sheet.cell(2, 1, annex_label)
-        cell.font = Font(bold=True, size=11, name="Calibri")
-        cell.alignment = CENTER
-        sheet.row_dimensions[2].height = 16
+        c = sheet.cell(2, 1, "ANEXO 03")
+        c.font = Font(bold=True, size=10, name="Calibri")
+        c.alignment = CENTER
 
-        # Fila 3 — titulo azul
         sheet.merge_cells(start_row=3, start_column=1, end_row=3, end_column=end_column)
-        cell = sheet.cell(3, 1, title)
-        cell.fill = FILL_TITLE
-        cell.font = FONT_TITLE
-        cell.alignment = CENTER
+        c = sheet.cell(3, 1, "FORMATO 01: REPORTE DE ASISTENCIA DETALLADO")
+        c.fill = FILL_TITLE
+        c.font = FONT_TITLE
+        c.alignment = CENTER
         sheet.row_dimensions[3].height = 20
 
-        # --- Bloque datos (filas 4-7) — sin merges que se pisen ---
-        # Fila 4
-        sheet.cell(4, 1, "UGEL:").font = FONT_BLACK_BOLD
-        sheet.cell(4, 2, ugel).font = Font(bold=True, size=10, name="Calibri")
-        sheet.cell(4, 5, "MES:").font = FONT_BLACK_BOLD
-        sheet.cell(4, 6, MONTH_NAMES[month - 1]).font = FONT_RED_BOLD
-        sheet.cell(4, 8, "ANO:").font = FONT_BLACK_BOLD
-        sheet.cell(4, 9, year).font = FONT_RED_BOLD
-        sheet.cell(4, 11, "TURNO:").font = FONT_BLACK_BOLD
-        sheet.cell(4, 12, shift).font = FONT_RED_BOLD
-        sheet.row_dimensions[4].height = 15
+        def _lab(row: int, c1: int, c2: int, text: str) -> None:
+            if c2 > c1:
+                sheet.merge_cells(start_row=row, start_column=c1, end_row=row, end_column=c2)
+            cell = sheet.cell(row, c1, text)
+            cell.font = FONT_BLACK_BOLD
+            cell.alignment = NOWRAP_LEFT
 
-        # Fila 5
-        sheet.cell(5, 1, "INSTITUCION EDUCATIVA:").font = FONT_BLACK_BOLD
-        sheet.cell(5, 2, school).font = FONT_RED_BOLD
-        sheet.cell(5, 5, "LUGAR:").font = FONT_BLACK_BOLD
-        sheet.cell(5, 6, address).font = FONT_RED_BOLD
-        sheet.row_dimensions[5].height = 15
+        def _val(row: int, c1: int, c2: int, text: str) -> None:
+            if c2 > c1:
+                sheet.merge_cells(start_row=row, start_column=c1, end_row=row, end_column=c2)
+            cell = sheet.cell(row, c1, text)
+            cell.font = FONT_RED_BOLD
+            cell.alignment = NOWRAP_LEFT
 
-        # Fila 6
-        sheet.cell(6, 1, "NIVEL EDUCATIVO Y MODALIDAD:").font = FONT_BLACK_BOLD
-        sheet.cell(6, 2, level).font = FONT_RED_BOLD
-        sheet.cell(6, 5, "DEP:").font = FONT_BLACK_BOLD
-        sheet.cell(6, 6, department).font = FONT_RED_BOLD
-        sheet.cell(6, 8, "PROV:").font = FONT_BLACK_BOLD
-        sheet.cell(6, 9, province).font = FONT_RED_BOLD
-        sheet.cell(6, 11, "DIS:").font = FONT_BLACK_BOLD
-        sheet.cell(6, 12, district).font = FONT_RED_BOLD
-        sheet.row_dimensions[6].height = 15
+        # --- Fila 4 ---
+        # A-B UGEL: | C-F valor | G-J MES: | K-P valor | Q-S ANO: | T-Y valor | AA-AC TURNO: | AD-AH valor
+        _lab(4, 1, 2, "UGEL:")
+        _val(4, 3, 6, ugel)
+        _lab(4, 7, 10, "MES:")
+        _val(4, 11, 16, MONTH_NAMES[month - 1])
+        _lab(4, 17, 19, "ANO:")
+        _val(4, 20, 25, str(year))
+        _lab(4, 27, 29, "TURNO:")
+        _val(4, 30, 34, shift)
 
-        # Fila 7
-        sheet.cell(7, 1, "CODIGO MODULAR:").font = FONT_BLACK_BOLD
-        sheet.cell(7, 2, modular).font = FONT_RED_BOLD
-        sheet.row_dimensions[7].height = 15
+        # --- Fila 5 ---
+        # A-B IE: | C-F valor | G-J LUGAR: | K-P valor
+        _lab(5, 1, 2, "IE:")
+        _val(5, 3, 6, school)
+        _lab(5, 7, 10, "LUGAR:")
+        _val(5, 11, 16, address)
 
-        # Fila 8 vacía separadora
-        sheet.row_dimensions[8].height = 6
+        # --- Fila 6 ---
+        # A-B NIVEL: | C-F valor | G-J DEP: | K-P valor | Q-S PROV: | T-Y valor | AA-AC DIS: | AD-AH valor
+        _lab(6, 1, 2, "NIVEL:")
+        _val(6, 3, 6, level)
+        _lab(6, 7, 10, "DEP:")
+        _val(6, 11, 16, department)
+        _lab(6, 17, 19, "PROV:")
+        _val(6, 20, 25, province)
+        _lab(6, 27, 29, "DIS:")
+        _val(6, 30, 34, district)
 
+        # --- Fila 7 ---
+        # A-B COD.MOD: | C-F valor
+        _lab(7, 1, 2, "COD.MOD:")
+        _val(7, 3, 6, modular)
+
+        for r in range(4, 8):
+            sheet.row_dimensions[r].height = 14
+        sheet.row_dimensions[8].height = 4
+        return 9
+
+    def _header_annex04(
+        self,
+        sheet: Any,
+        institution: dict[str, Any],
+        month: int,
+        year: int,
+        end_column: int,
+    ) -> int:
+        """Cabecera Anexo 04 con columnas fijas:
+
+        Labels A-B valores C-E  |  MES/LUGAR/DEP F-G valores H-I
+        ANO/PROV K valores L-M  |  TURNO/DIS N valores O-P
+        """
+        ugel = _safe(institution.get("ugel"))
+        school = _safe(institution.get("school_name"))
+        level = _safe(institution.get("education_level"))
+        modular = _safe(institution.get("modular_code"))
+        address = _safe(institution.get("address") or institution.get("lugar"))
+        department = _safe(institution.get("department") or "PUNO")
+        province = _safe(institution.get("province"))
+        district = _safe(institution.get("district"))
+        shift = _safe(institution.get("shift_name"))
+
+        end_column = max(end_column, 16)
+
+        sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_column)
+        c = sheet.cell(1, 1, LEGAL_HEADER)
+        c.font = Font(bold=True, size=7, name="Calibri")
+        c.alignment = CENTER
+        sheet.row_dimensions[1].height = 20
+
+        sheet.merge_cells(start_row=2, start_column=1, end_row=2, end_column=end_column)
+        c = sheet.cell(2, 1, "ANEXO 04")
+        c.font = Font(bold=True, size=10, name="Calibri")
+        c.alignment = CENTER
+
+        sheet.merge_cells(start_row=3, start_column=1, end_row=3, end_column=end_column)
+        c = sheet.cell(
+            3, 1,
+            "FORMATO 02: REPORTE CONSOLIDADO DE INASISTENCIAS, TARDANZAS Y PERMISOS SIN GOCE DE REMUNERACION",
+        )
+        c.fill = FILL_TITLE
+        c.font = FONT_TITLE
+        c.alignment = CENTER
+        sheet.row_dimensions[3].height = 20
+
+        def _lab(row: int, c1: int, c2: int, text: str) -> None:
+            if c2 > c1:
+                sheet.merge_cells(start_row=row, start_column=c1, end_row=row, end_column=c2)
+            cell = sheet.cell(row, c1, text)
+            cell.font = FONT_BLACK_BOLD
+            cell.alignment = NOWRAP_LEFT
+
+        def _val(row: int, c1: int, c2: int, text: str) -> None:
+            if c2 > c1:
+                sheet.merge_cells(start_row=row, start_column=c1, end_row=row, end_column=c2)
+            cell = sheet.cell(row, c1, text)
+            cell.font = FONT_RED_BOLD
+            cell.alignment = NOWRAP_LEFT
+
+        # --- Fila 4 ---
+        # A-B UGEL: | C-E valor | F-G MES: | H-I valor | K ANO: | L-M valor | N TURNO: | O-P valor
+        _lab(4, 1, 2, "UGEL:")
+        _val(4, 3, 5, ugel)
+        _lab(4, 6, 7, "MES:")
+        _val(4, 8, 9, MONTH_NAMES[month - 1])
+        _lab(4, 11, 11, "ANO:")
+        _val(4, 12, 13, str(year))
+        _lab(4, 14, 14, "TURNO:")
+        _val(4, 15, 16, shift)
+
+        # --- Fila 5 ---
+        # A-B IE: | C-E valor | F-G LUGAR: | H-I valor
+        _lab(5, 1, 2, "IE:")
+        _val(5, 3, 5, school)
+        _lab(5, 6, 7, "LUGAR:")
+        _val(5, 8, 9, address)
+
+        # --- Fila 6 ---
+        # A-B NIVEL: | C-E valor | F-G DEP: | H-I valor | K PROV: | L-M valor | N DIS: | O-P valor
+        _lab(6, 1, 2, "NIVEL:")
+        _val(6, 3, 5, level)
+        _lab(6, 6, 7, "DEP:")
+        _val(6, 8, 9, department)
+        _lab(6, 11, 11, "PROV:")
+        _val(6, 12, 13, province)
+        _lab(6, 14, 14, "DIS:")
+        _val(6, 15, 16, district)
+
+        # --- Fila 7 ---
+        # A-B COD.MOD: | C-E valor
+        _lab(7, 1, 2, "COD.MOD:")
+        _val(7, 3, 5, modular)
+
+        for r in range(4, 8):
+            sheet.row_dimensions[r].height = 14
+        sheet.row_dimensions[8].height = 4
         return 9
 
     def _write_attendance_sheet(
@@ -281,123 +411,95 @@ class ReportService:
         year: int,
     ) -> None:
         days = monthrange(year, month)[1]
-        first_day_col = 7
-        end_column = first_day_col + days - 1
+        first_day = 7
+        end_col = first_day + days - 1
+        table_start = self._header_annex03(sheet, institution, month, year, end_col)
 
-        table_start = self._write_official_header(
-            sheet,
-            institution,
-            month,
-            year,
-            "ANEXO 03",
-            "FORMATO 01: REPORTE DE ASISTENCIA DETALLADO",
-            end_column,
-        )
+        fixed = ["N°", "DNI", "APELLIDOS Y NOMBRES", "CARGO", "CONDICION\nLABORAL", "JORNADA\nLABORAL"]
+        hr = table_start
+        dr = table_start + 1
+        wr = table_start + 2
 
-        fixed_headers = [
-            "N°", "DNI", "APELLIDOS Y NOMBRES", "CARGO",
-            "CONDICION LABORAL", "JORNADA LABORAL",
-        ]
-        header_row = table_start
-        day_row = table_start + 1
-        weekday_row = table_start + 2
-
-        for col, header in enumerate(fixed_headers, start=1):
-            sheet.merge_cells(
-                start_row=header_row, start_column=col,
-                end_row=day_row, end_column=col,
-            )
-            cell = sheet.cell(header_row, col, header)
+        for col, h in enumerate(fixed, 1):
+            sheet.merge_cells(start_row=hr, start_column=col, end_row=dr, end_column=col)
+            cell = sheet.cell(hr, col, h)
             cell.fill = FILL_HEADER
             cell.font = FONT_BLACK_BOLD
             cell.alignment = CENTER
-            cell.border = THIN_BORDER
-            sheet.cell(day_row, col).border = THIN_BORDER
-            sheet.cell(day_row, col).fill = FILL_HEADER
+            cell.border = BORDER_THIN
+            sheet.cell(dr, col).border = BORDER_THIN
+            sheet.cell(dr, col).fill = FILL_HEADER
 
-        # DIAS CALENDARIO
-        sheet.merge_cells(
-            start_row=header_row, start_column=first_day_col,
-            end_row=header_row, end_column=end_column,
-        )
-        cell = sheet.cell(header_row, first_day_col, "DIAS CALENDARIO")
+        sheet.merge_cells(start_row=hr, start_column=first_day, end_row=hr, end_column=end_col)
+        cell = sheet.cell(hr, first_day, "DIAS CALENDARIO")
         cell.fill = FILL_HEADER
         cell.font = FONT_BLACK_BOLD
         cell.alignment = CENTER
-        for c in range(first_day_col, end_column + 1):
-            sheet.cell(header_row, c).border = THIN_BORDER
-            sheet.cell(header_row, c).fill = FILL_HEADER
+        for c in range(first_day, end_col + 1):
+            sheet.cell(hr, c).border = BORDER_THIN
+            sheet.cell(hr, c).fill = FILL_HEADER
 
-        weekday_labels = ["lu.", "ma.", "mi.", "ju.", "vi.", "sa.", "do."]
+        wd = ["lu.", "ma.", "mi.", "ju.", "vi.", "sa.", "do."]
         for day in range(1, days + 1):
-            col = first_day_col + day - 1
-            cell = sheet.cell(day_row, col, day)
+            col = first_day + day - 1
+            cell = sheet.cell(dr, col, day)
             cell.fill = FILL_HEADER
             cell.font = FONT_BLACK_BOLD
             cell.alignment = CENTER
-            cell.border = THIN_BORDER
-            wd = sheet.cell(
-                weekday_row, col,
-                weekday_labels[date(year, month, day).weekday()],
-            )
-            wd.font = FONT_SMALL
-            wd.alignment = CENTER
-            wd.border = THIN_BORDER
+            cell.border = BORDER_THIN
+            w_idx = date(year, month, day).weekday()
+            is_weekend = w_idx in (5, 6)
+            wcell = sheet.cell(wr, col, wd[w_idx])
+            wcell.font = FONT_RED_WEEKEND if is_weekend else FONT_TINY
+            wcell.alignment = CENTER
+            wcell.border = BORDER_THIN
+            wcell.fill = FILL_WEEKEND if is_weekend else FILL_SUB
 
-        sheet.row_dimensions[header_row].height = 18
-        sheet.row_dimensions[day_row].height = 14
-        sheet.row_dimensions[weekday_row].height = 12
+        sheet.row_dimensions[hr].height = 16
+        sheet.row_dimensions[dr].height = 12
+        sheet.row_dimensions[wr].height = 12
 
-        data_start = weekday_row + 1
-        status_code = {
+        data0 = wr + 1
+        codes = {
             "present": "A", "late": "T", "absent": "F",
             "justified": "J", "leave": "L", "permission": "P",
         }
-
-        for index, staff in enumerate(staff_rows, start=1):
-            row = data_start + index - 1
-            values = [
-                index,
+        for i, staff in enumerate(staff_rows, 1):
+            row = data0 + i - 1
+            status = _safe(staff.get("employment_status"))
+            if len(status) > 15:
+                status = status.split()[0]
+            vals = [
+                i,
                 staff.get("dni") or "",
                 _safe(self._full_name(staff)),
                 _safe(staff.get("job_title")),
-                _safe(staff.get("employment_status")),
+                status,
                 "",
             ]
-            for col, value in enumerate(values, start=1):
-                cell = sheet.cell(row, col, value)
-                cell.border = THIN_BORDER
+            for col, v in enumerate(vals, 1):
+                cell = sheet.cell(row, col, v)
+                cell.border = BORDER_THIN
                 cell.font = FONT_NORMAL
-                cell.alignment = CENTER if col in (1, 2) else LEFT
-                if index % 2 == 0:
-                    cell.fill = FILL_ALT
-
+                cell.alignment = CENTER if col in (1, 2, 5, 6) else LEFT
             for day in range(1, days + 1):
-                attendance = staff["days"].get(date(year, month, day).isoformat())
-                status = attendance.get("status") if attendance else ""
-                code = status_code.get(status, "")
-                cell = sheet.cell(row, first_day_col + day - 1, code)
+                att = staff["days"].get(date(year, month, day).isoformat())
+                st = att.get("status") if att else ""
+                cell = sheet.cell(row, first_day + day - 1, codes.get(st, ""))
                 cell.alignment = CENTER
-                cell.border = THIN_BORDER
-                cell.font = FONT_SMALL
-                if index % 2 == 0:
-                    cell.fill = FILL_ALT
-
+                cell.border = BORDER_THIN
+                cell.font = FONT_TINY
             sheet.row_dimensions[row].height = 14
 
-        last_row = data_start + max(len(staff_rows), 1) - 1
-        if not staff_rows:
-            for col in range(1, end_column + 1):
-                sheet.cell(data_start, col).border = THIN_BORDER
-            sheet.row_dimensions[data_start].height = 14
-
-        for col, width in enumerate([4, 10, 30, 12, 14, 10], start=1):
-            sheet.column_dimensions[get_column_letter(col)].width = width
+        last = data0 + max(len(staff_rows), 1) - 1
+        widths = [4, 10, 26, 12, 12, 9]
+        for col, w in enumerate(widths, 1):
+            sheet.column_dimensions[get_column_letter(col)].width = w
         for d in range(days):
-            sheet.column_dimensions[get_column_letter(first_day_col + d)].width = 3.2
+            sheet.column_dimensions[get_column_letter(first_day + d)].width = 2.8
 
-        self._apply_print_settings(sheet, header_row, last_row, end_column)
-        sheet.freeze_panes = f"{get_column_letter(first_day_col)}{data_start}"
+        self._print_a4(sheet, hr, last, end_col)
+        sheet.freeze_panes = f"{get_column_letter(first_day)}{data0}"
 
     def _write_consolidated_sheet(
         self,
@@ -407,96 +509,115 @@ class ReportService:
         month: int,
         year: int,
     ) -> None:
-        headers = [
-            "N°", "DNI", "APELLIDOS Y NOMBRES", "CARGO",
-            "CONDICION LABORAL", "JORNADA LABORAL",
-            "INASIST. JUSTIF. DIAS",
-            "LIC. CON GOCE", "LIC. SIN GOCE", "LIC. DU",
-            "FALTAS DIAS", "TARDANZAS MIN (*)",
-            "PERM. SG HORAS (*)", "PERM. SG MIN (*)",
-            "HUELGA PARO DIAS", "Observaciones",
+        end_col = 16
+        table_start = self._header_annex04(sheet, institution, month, year, end_col)
+        hr1 = table_start
+        hr2 = table_start + 1
+
+        single_headers = [
+            (1, "N°"), (2, "DNI"), (3, "APELLIDOS Y NOMBRES"),
+            (4, "CARGO"), (5, "CONDICION\nLABORAL"), (6, "JORNADA\nLABORAL"),
         ]
-        end_column = len(headers)
+        for col, h in single_headers:
+            sheet.merge_cells(start_row=hr1, start_column=col, end_row=hr2, end_column=col)
+            c = sheet.cell(hr1, col, h)
+            c.fill = FILL_HEADER
+            c.font = FONT_BLACK_BOLD
+            c.alignment = CENTER
+            c.border = BORDER_THIN
+            sheet.cell(hr2, col).border = BORDER_THIN
+            sheet.cell(hr2, col).fill = FILL_HEADER
 
-        table_start = self._write_official_header(
-            sheet,
-            institution,
-            month,
-            year,
-            "ANEXO 04",
-            "FORMATO 02: REPORTE CONSOLIDADO DE INASISTENCIAS, TARDANZAS Y PERMISOS SIN GOCE DE REMUNERACION",
-            end_column,
-        )
+        groups = [
+            (7, 7, "INASISTENCIAS\nJUSTIFICADAS", ["DIAS"]),
+            (8, 10, "LICENCIAS", ["CON\nGOCE", "SIN GOCE", "DU"]),
+            (11, 11, "FALTAS", ["DIAS"]),
+            (12, 12, "TARDANZAS", ["MINUTOS (*)"]),
+            (13, 14, "PERMISOS SG", ["HORAS (*)", "MINUTOS (*)"]),
+            (15, 15, "HUELGA PARO", ["DIAS"]),
+        ]
+        for start_c, end_c, title, subs in groups:
+            sheet.merge_cells(start_row=hr1, start_column=start_c, end_row=hr1, end_column=end_c)
+            c = sheet.cell(hr1, start_c, title)
+            c.fill = FILL_HEADER
+            c.font = FONT_BLACK_BOLD
+            c.alignment = CENTER
+            for col_idx in range(start_c, end_c + 1):
+                sheet.cell(hr1, col_idx).border = BORDER_THIN
+                sheet.cell(hr1, col_idx).fill = FILL_HEADER
+            for idx, sub_title in enumerate(subs):
+                sc = sheet.cell(hr2, start_c + idx, sub_title)
+                sc.fill = FILL_HEADER
+                sc.font = FONT_BLACK_BOLD
+                sc.alignment = CENTER
+                sc.border = BORDER_THIN
 
-        header_row = table_start
-        for col, header in enumerate(headers, start=1):
-            cell = sheet.cell(header_row, col, header)
-            cell.fill = FILL_HEADER
-            cell.font = FONT_BLACK_BOLD
-            cell.alignment = CENTER
-            cell.border = THIN_BORDER
-        sheet.row_dimensions[header_row].height = 32
+        sheet.merge_cells(start_row=hr1, start_column=16, end_row=hr2, end_column=16)
+        c = sheet.cell(hr1, 16, "Observaciones")
+        c.fill = FILL_HEADER
+        c.font = FONT_BLACK_BOLD
+        c.alignment = CENTER
+        c.border = BORDER_THIN
+        sheet.cell(hr2, 16).border = BORDER_THIN
+        sheet.cell(hr2, 16).fill = FILL_HEADER
 
-        data_start = header_row + 1
-        for index, staff in enumerate(staff_rows, start=1):
-            status_counts = Counter(item["status"] for item in staff["days"].values())
-            late_minutes = sum(
-                item.get("late_minutes", 0)
-                for item in staff["days"].values()
-                if item.get("status") == "late"
+        sheet.row_dimensions[hr1].height = 20
+        sheet.row_dimensions[hr2].height = 22
+
+        data0 = hr2 + 1
+        for i, staff in enumerate(staff_rows, 1):
+            counts = Counter(x["status"] for x in staff["days"].values())
+            late_min = sum(
+                x.get("late_minutes", 0)
+                for x in staff["days"].values()
+                if x.get("status") == "late"
             )
-            row = data_start + index - 1
-            values = [
-                index,
+            status = _safe(staff.get("employment_status"))
+            if len(status) > 15:
+                status = status.split()[0]
+            row = data0 + i - 1
+            vals = [
+                i,
                 staff.get("dni") or "",
                 _safe(self._full_name(staff)),
                 _safe(staff.get("job_title")),
-                _safe(staff.get("employment_status")),
+                status,
                 "",
-                status_counts.get("justified", 0),
-                status_counts.get("leave", 0),
+                counts.get("justified", 0),
+                counts.get("leave", 0),
                 0, 0,
-                status_counts.get("absent", 0),
-                late_minutes,
+                counts.get("absent", 0),
+                late_min,
                 0, 0, 0, "",
             ]
-            for col, value in enumerate(values, start=1):
-                cell = sheet.cell(row, col, value)
-                cell.border = THIN_BORDER
+            for col, v in enumerate(vals, 1):
+                cell = sheet.cell(row, col, v)
+                cell.border = BORDER_THIN
                 cell.font = FONT_NORMAL
-                cell.alignment = CENTER if col in (1, 2) or col >= 7 else LEFT
-                if index % 2 == 0:
-                    cell.fill = FILL_ALT
+                cell.alignment = CENTER if col in (1, 2, 5, 6) or col >= 7 else LEFT
             sheet.row_dimensions[row].height = 14
 
-        last_row = data_start + max(len(staff_rows), 1) - 1
-        if not staff_rows:
-            for col in range(1, end_column + 1):
-                sheet.cell(data_start, col).border = THIN_BORDER
-            sheet.row_dimensions[data_start].height = 14
+        last = data0 + max(len(staff_rows), 1) - 1
+        widths = [4, 10, 26, 12, 12, 9, 10, 7, 8, 5, 7, 10, 9, 10, 8, 18]
+        for col, w in enumerate(widths, 1):
+            sheet.column_dimensions[get_column_letter(col)].width = w
 
-        widths = [4, 10, 28, 12, 14, 10, 12, 10, 10, 8, 9, 12, 11, 11, 11, 18]
-        for col, width in enumerate(widths, start=1):
-            sheet.column_dimensions[get_column_letter(col)].width = width
+        self._print_a4(sheet, hr1, last, end_col)
+        sheet.freeze_panes = f"A{data0}"
 
-        self._apply_print_settings(sheet, header_row, last_row, end_column)
-        sheet.freeze_panes = f"A{data_start}"
-
-    def _apply_print_settings(
-        self, sheet: Any, start_row: int, end_row: int, end_column: int
-    ) -> None:
+    def _print_a4(self, sheet: Any, start_row: int, end_row: int, end_col: int) -> None:
         sheet.sheet_view.showGridLines = False
         sheet.page_setup.orientation = "landscape"
         sheet.page_setup.paperSize = sheet.PAPERSIZE_A4
         sheet.page_setup.fitToWidth = 1
         sheet.page_setup.fitToHeight = 0
         sheet.sheet_properties.pageSetUpPr.fitToPage = True
-        sheet.page_margins.left = 0.25
-        sheet.page_margins.right = 0.25
-        sheet.page_margins.top = 0.35
-        sheet.page_margins.bottom = 0.35
+        sheet.page_margins.left = 0.2
+        sheet.page_margins.right = 0.2
+        sheet.page_margins.top = 0.3
+        sheet.page_margins.bottom = 0.3
         sheet.print_title_rows = f"1:{start_row}"
-        sheet.print_area = f"A1:{get_column_letter(end_column)}{end_row}"
+        sheet.print_area = f"A1:{get_column_letter(end_col)}{end_row}"
 
     def _staff_member(self, staff_member_id: int) -> dict[str, Any]:
         try:

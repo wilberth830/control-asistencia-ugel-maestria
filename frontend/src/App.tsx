@@ -2232,10 +2232,11 @@ function ReportsPage() {
   const [year, setYear] = useState(2026);
   const [annex, setAnnex] = useState<"03" | "04">("03");
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<any>(null);
+  const [showHeaderEdit, setShowHeaderEdit] = useState(false);
 
-  // Campos de cabecera editables (prellenados, se pueden cambiar antes de exportar)
   const [header, setHeader] = useState({
     ugel: "SAN ROMAN",
     school_name: "IE Demo CHIQUISTRUKIS",
@@ -2256,53 +2257,65 @@ function ReportsPage() {
   const updateHeader = (key: string, value: string) =>
     setHeader((prev) => ({ ...prev, [key]: value }));
 
-  const loadPreview = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const endpoint =
-        annex === "03" ? "/api/v1/reports/annex-03" : "/api/v1/reports/annex-04";
-      const response = await apiClient.get(endpoint, {
-        params: { month, year, format: "json" },
-      });
-      const data = response.data;
-      // Si la API devuelve institution, prellenar cabecera
-      if (data.institution) {
-        setHeader((prev) => ({
-          ...prev,
-          ugel: data.institution.ugel ?? prev.ugel,
-          school_name: data.institution.school_name ?? prev.school_name,
-          modular_code: data.institution.modular_code ?? prev.modular_code,
-          education_level: data.institution.education_level ?? prev.education_level,
-          shift_name: data.institution.shift_name ?? prev.shift_name,
-        }));
-      }
-      if (annex === "03") {
-        setPreview({
-          type: "03",
-          rows: (data.rows || []).map((r: any) => ({
-            dni: r.dni || "",
-            full_name: r.full_name || "",
-            days: r.days || [],
-          })),
+  // Carga automática al cambiar mes / año / anexo
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const endpoint =
+          annex === "03" ? "/api/v1/reports/annex-03" : "/api/v1/reports/annex-04";
+        const response = await apiClient.get(endpoint, {
+          params: { month, year, format: "json" },
         });
-      } else {
-        setPreview({
-          type: "04",
-          totals: data.totals || {},
-          staff_count: data.staff_count ?? 0,
-        });
+        if (cancelled) return;
+        const data = response.data;
+        if (data.institution) {
+          setHeader((prev) => ({
+            ...prev,
+            ugel: data.institution.ugel ?? prev.ugel,
+            school_name: data.institution.school_name ?? prev.school_name,
+            modular_code: data.institution.modular_code ?? prev.modular_code,
+            education_level: data.institution.education_level ?? prev.education_level,
+            shift_name: data.institution.shift_name ?? prev.shift_name,
+          }));
+        }
+        if (annex === "03") {
+          setPreview({
+            type: "03",
+            rows: (data.rows || []).map((r: any) => ({
+              dni: r.dni || "",
+              full_name: r.full_name || "",
+              job_title: r.job_title || "",
+              employment_status: r.employment_status || "",
+              days: r.days || [],
+            })),
+          });
+        } else {
+          setPreview({
+            type: "04",
+            totals: data.totals || {},
+            staff_count: data.staff_count ?? 0,
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setError("No se pudo cargar la vista previa");
+          setPreview(null);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    } catch {
-      setError("No se pudo generar la vista previa");
-      setPreview(null);
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [month, year, annex]);
 
   const exportExcel = async () => {
-    setLoading(true);
+    setExporting(true);
     setError("");
     try {
       const response = await apiClient.get("/api/v1/reports/monthly-export", {
@@ -2335,14 +2348,12 @@ function ReportsPage() {
     } catch {
       setError("No se pudo exportar el Excel");
     } finally {
-      setLoading(false);
+      setExporting(false);
     }
   };
 
-  const dayCols = Array.from(
-    { length: Math.min(new Date(year, month, 0).getDate(), 15) },
-    (_, i) => i + 1,
-  );
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const allDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
   const statusLetter = (status: string) =>
     ({ present: "A", late: "T", absent: "F", justified: "J", leave: "L", permission: "P" }[
       status
@@ -2352,192 +2363,199 @@ function ReportsPage() {
     <>
       <PageHeader
         title="Reportes oficiales"
-        description="Anexo 03 y 04 · edita la cabecera antes de exportar · estilo oficial"
+        description="Anexo 03 y 04 · vista previa automática · exportar Excel listo para imprimir"
       />
-      <div className="report-layout">
-        <section className="card report-filter">
-          <div className="card-header">Filtros y cabecera</div>
-          <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <label className="form-field">
-              <span>Tipo de anexo</span>
-              <select value={annex} onChange={(e) => setAnnex(e.target.value as "03" | "04")}>
-                <option value="03">Anexo 03 – Detallado</option>
-                <option value="04">Anexo 04 – Consolidado</option>
-              </select>
-            </label>
-            <label className="form-field">
-              <span>Mes</span>
-              <select value={month} onChange={(e) => setMonth(Number(e.target.value))}>
-                {monthNames.slice(1).map((name, idx) => (
-                  <option key={name} value={idx + 1}>{name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="form-field">
-              <span>Año</span>
-              <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
-                <option value={2026}>2026</option>
-                <option value={2025}>2025</option>
-                <option value={2024}>2024</option>
-              </select>
-            </label>
 
-            <hr style={{ border: "none", borderTop: "1px solid #e2e8f0", margin: "4px 0" }} />
-            <p style={{ fontSize: 11, color: "#64748b", margin: 0 }}>
-              Datos de cabecera (editables antes de exportar)
-            </p>
-            {(
-              [
-                ["ugel", "UGEL"],
-                ["school_name", "Institucion educativa"],
-                ["modular_code", "Codigo modular"],
-                ["education_level", "Nivel / modalidad"],
-                ["shift_name", "Turno"],
-                ["address", "Lugar / direccion"],
-                ["department", "Departamento"],
-                ["province", "Provincia"],
-                ["district", "Distrito"],
-              ] as const
-            ).map(([key, label]) => (
-              <label className="form-field" key={key}>
-                <span>{label}</span>
-                <input
-                  value={header[key]}
-                  onChange={(e) => updateHeader(key, e.target.value)}
-                />
-              </label>
-            ))}
-
+      {/* Barra superior: filtros + exportar */}
+      <div className="report-toolbar">
+        <div className="report-toolbar-content">
+          <label className="form-field">
+            <span>Anexo</span>
+            <select value={annex} onChange={(e) => setAnnex(e.target.value as "03" | "04")}>
+              <option value="03">Anexo 03 – Detallado</option>
+              <option value="04">Anexo 04 – Consolidado</option>
+            </select>
+          </label>
+          <label className="form-field">
+            <span>Mes</span>
+            <select value={month} onChange={(e) => setMonth(Number(e.target.value))}>
+              {monthNames.slice(1).map((name, idx) => (
+                <option key={name} value={idx + 1}>{name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="form-field">
+            <span>Año</span>
+            <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
+              <option value={2026}>2026</option>
+              <option value={2025}>2025</option>
+              <option value={2024}>2024</option>
+            </select>
+          </label>
+          <div className="report-actions">
             <button
-              className="btn btn-primary btn-block"
+              className="btn btn-sm btn-ghost"
               type="button"
-              disabled={loading}
-              onClick={loadPreview}
+              onClick={() => setShowHeaderEdit((v) => !v)}
             >
-              {loading ? "Generando…" : "Generar vista"}
+              {showHeaderEdit ? "Ocultar cabecera" : "Editar cabecera"}
             </button>
             <button
-              className="btn btn-secondary btn-block"
+              className="btn btn-sm btn-primary"
               type="button"
-              disabled={loading}
+              disabled={exporting}
               onClick={exportExcel}
             >
-              Exportar Excel
+              {exporting ? "Exportando…" : "Exportar Excel"}
             </button>
           </div>
-        </section>
+        </div>
 
-        <section className="card report-preview">
-          <div className="card-header">
-            Vista previa · Anexo {annex} · {monthNames[month]} {year}
-          </div>
-          <div className="card-body">
-            {error && <div className="alert-danger">{error}</div>}
-
-            <div className="annex-official">
-              <div className="annex-legal">
-                NORMAS PARA EL REGISTRO Y CONTROL DE ASISTENCIA Y SU APLICACION EN LA
-                PLANILLA UNICA DE PAGOS DE LOS PROFESORES Y AUXILIARES DE EDUCACION
-                (R.S.G. N 326-2017-MINEDU)
-              </div>
-              <div className="annex-title-bar">
-                {annex === "03"
-                  ? "FORMATO 01: REPORTE DE ASISTENCIA DETALLADO"
-                  : "FORMATO 02: REPORTE CONSOLIDADO DE INASISTENCIAS, TARDANZAS Y PERMISOS"}
-              </div>
-              <div className="annex-meta">
-                <div><strong>UGEL:</strong> {header.ugel || "—"}</div>
-                <div><strong>MES:</strong> <span className="text-red">{monthNames[month].toUpperCase()}</span></div>
-                <div><strong>ANO:</strong> <span className="text-red">{year}</span></div>
-                <div><strong>TURNO:</strong> <span className="text-red">{header.shift_name || "—"}</span></div>
-              </div>
-              <div className="annex-meta">
-                <div><strong>IE:</strong> <span className="text-red">{header.school_name || "—"}</span></div>
-                <div><strong>COD. MODULAR:</strong> <span className="text-red">{header.modular_code || "—"}</span></div>
-                <div><strong>NIVEL:</strong> <span className="text-red">{header.education_level || "—"}</span></div>
-                <div><strong>DEP/PROV/DIS:</strong> {header.department} / {header.province} / {header.district || "—"}</div>
-              </div>
-
-              {!preview && (
-                <p className="text-muted" style={{ marginTop: 16 }}>
-                  Edita la cabecera si lo necesitas y pulsa <strong>Generar vista</strong> o <strong>Exportar Excel</strong>.
-                </p>
-              )}
-
-              {preview?.type === "03" && (
-                <div className="table-wrap annex-table" style={{ marginTop: 12 }}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>N°</th>
-                        <th>DNI</th>
-                        <th>Apellidos y nombres</th>
-                        {dayCols.map((d) => (
-                          <th key={d}>{d}</th>
-                        ))}
-                        <th>…</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {preview.rows.length === 0 ? (
-                        <tr><td colSpan={dayCols.length + 4}>Sin registros</td></tr>
-                      ) : (
-                        preview.rows.map((row: any, idx: number) => {
-                          const byDate: Record<string, string> = {};
-                          (row.days || []).forEach((d: any) => {
-                            byDate[d.attendance_date] = statusLetter(d.status);
-                          });
-                          return (
-                            <tr key={`${row.dni}-${idx}`}>
-                              <td>{idx + 1}</td>
-                              <td>{row.dni}</td>
-                              <td style={{ textAlign: "left" }}>{row.full_name}</td>
-                              {dayCols.map((d) => {
-                                const key = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-                                return <td key={d}>{byDate[key] || ""}</td>;
-                              })}
-                              <td>…</td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {preview?.type === "04" && (
-                <div className="table-wrap annex-table" style={{ marginTop: 12 }}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Presentes</th>
-                        <th>Tardanzas</th>
-                        <th>Faltas</th>
-                        <th>Justificadas</th>
-                        <th>Licencias</th>
-                        <th>Permisos</th>
-                        <th>Personal</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td>{preview.totals?.present ?? 0}</td>
-                        <td>{preview.totals?.late ?? 0}</td>
-                        <td>{preview.totals?.absent ?? 0}</td>
-                        <td>{preview.totals?.justified ?? 0}</td>
-                        <td>{preview.totals?.leave ?? 0}</td>
-                        <td>{preview.totals?.permission ?? 0}</td>
-                        <td>{preview.staff_count ?? 0}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              )}
+        {/* Panel colapsable de cabecera (no son campos de BD: solo override al exportar) */}
+        {showHeaderEdit && (
+          <div className="report-header-edit">
+            <p className="report-header-hint">
+              Estos datos se usan solo en el Excel exportado. No modifican la base de datos.
+              Vienen precargados de la institución activa.
+            </p>
+            <div className="report-header-grid">
+              {(
+                [
+                  ["ugel", "UGEL"],
+                  ["school_name", "Institucion educativa"],
+                  ["modular_code", "Codigo modular"],
+                  ["education_level", "Nivel / modalidad"],
+                  ["shift_name", "Turno"],
+                  ["address", "Lugar / direccion"],
+                  ["department", "Departamento"],
+                  ["province", "Provincia"],
+                  ["district", "Distrito"],
+                ] as const
+              ).map(([key, label]) => (
+                <label className="form-field" key={key}>
+                  <span>{label}</span>
+                  <input
+                    value={header[key]}
+                    onChange={(e) => updateHeader(key, e.target.value)}
+                  />
+                </label>
+              ))}
             </div>
           </div>
-        </section>
+        )}
       </div>
+
+      {error && <div className="alert-danger">{error}</div>}
+      {loading && <p className="text-muted">Cargando vista previa…</p>}
+
+      {/* Vista previa estilo oficial */}
+      <section className="card report-preview">
+        <div className="card-header">
+          Vista previa · Anexo {annex} · {monthNames[month]} {year}
+        </div>
+        <div className="card-body">
+          <div className="annex-official">
+            <div className="annex-legal">
+              NORMAS PARA EL REGISTRO Y CONTROL DE ASISTENCIA Y SU APLICACION EN LA
+              PLANILLA UNICA DE PAGOS (R.S.G. N 326-2017-MINEDU)
+            </div>
+            <div className="annex-title-bar">
+              {annex === "03"
+                ? "FORMATO 01: REPORTE DE ASISTENCIA DETALLADO"
+                : "FORMATO 02: REPORTE CONSOLIDADO DE INASISTENCIAS, TARDANZAS Y PERMISOS"}
+            </div>
+            <div className="annex-meta">
+              <div><strong>UGEL:</strong> {header.ugel || "—"}</div>
+              <div><strong>MES:</strong> <span className="text-red">{monthNames[month].toUpperCase()}</span></div>
+              <div><strong>ANO:</strong> <span className="text-red">{year}</span></div>
+              <div><strong>TURNO:</strong> <span className="text-red">{header.shift_name || "—"}</span></div>
+            </div>
+            <div className="annex-meta">
+              <div><strong>IE:</strong> <span className="text-red">{header.school_name || "—"}</span></div>
+              <div><strong>COD. MOD:</strong> <span className="text-red">{header.modular_code || "—"}</span></div>
+              <div><strong>NIVEL:</strong> <span className="text-red">{header.education_level || "—"}</span></div>
+              <div><strong>DEP/PROV/DIS:</strong> {header.department} / {header.province} / {header.district || "—"}</div>
+            </div>
+
+            {preview?.type === "03" && (
+              <div className="table-wrap annex-table annex-calendar" style={{ marginTop: 12 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>N°</th>
+                      <th>DNI</th>
+                      <th>Apellidos y nombres</th>
+                      {allDays.map((d) => (
+                        <th key={d} className="day-col">{d}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(preview.rows || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={allDays.length + 3}>Sin registros del mes</td>
+                      </tr>
+                    ) : (
+                      preview.rows.map((row: any, idx: number) => {
+                        const byDate: Record<string, string> = {};
+                        (row.days || []).forEach((d: any) => {
+                          byDate[d.attendance_date] = statusLetter(d.status);
+                        });
+                        return (
+                          <tr key={`${row.dni}-${idx}`}>
+                            <td>{idx + 1}</td>
+                            <td>{row.dni}</td>
+                            <td style={{ textAlign: "left", whiteSpace: "nowrap" }}>
+                              {row.full_name}
+                            </td>
+                            {allDays.map((d) => {
+                              const key = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+                              return (
+                                <td key={d} className="day-col">
+                                  {byDate[key] || ""}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {preview?.type === "04" && (
+              <div className="table-wrap annex-table" style={{ marginTop: 12 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Presentes</th>
+                      <th>Tardanzas</th>
+                      <th>Faltas</th>
+                      <th>Justificadas</th>
+                      <th>Licencias</th>
+                      <th>Permisos</th>
+                      <th>Personal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>{preview.totals?.present ?? 0}</td>
+                      <td>{preview.totals?.late ?? 0}</td>
+                      <td>{preview.totals?.absent ?? 0}</td>
+                      <td>{preview.totals?.justified ?? 0}</td>
+                      <td>{preview.totals?.leave ?? 0}</td>
+                      <td>{preview.totals?.permission ?? 0}</td>
+                      <td>{preview.staff_count ?? 0}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
     </>
   );
 }
