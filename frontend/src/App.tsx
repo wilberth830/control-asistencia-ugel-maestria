@@ -1915,8 +1915,7 @@ function JustificationsPage() {
   const [loadedAbsenceYear, setLoadedAbsenceYear] = useState(initialYear);
   const [absencesLoading, setAbsencesLoading] = useState(true);
   const [staffMemberId, setStaffMemberId] = useState(0);
-  const [startDate, setStartDate] = useState(localDate);
-  const [endDate, setEndDate] = useState(localDate);
+  const [justificationDate, setJustificationDate] = useState(localDate);
   const [normCode, setNormCode] = useState("LG");
   const [reason, setReason] = useState("");
   const [supportFile, setSupportFile] = useState<File | null>(null);
@@ -1968,8 +1967,7 @@ function JustificationsPage() {
   const selectedAbsences = absences.filter(
     (item) =>
       item.staff_member_id === staffMemberId &&
-      item.attendance_date >= startDate &&
-      item.attendance_date <= endDate,
+      item.attendance_date === justificationDate,
   );
   const absenceYears = Array.from({ length: 7 }, (_, index) => initialYear + 1 - index);
 
@@ -1998,8 +1996,7 @@ function JustificationsPage() {
 
   const selectAbsence = (item: AttendanceDay) => {
     setStaffMemberId(item.staff_member_id);
-    setStartDate(item.attendance_date);
-    setEndDate(item.attendance_date);
+    setJustificationDate(item.attendance_date);
     setError("");
     setMessage("");
   };
@@ -2028,23 +2025,19 @@ function JustificationsPage() {
       setError("Selecciona una inasistencia pendiente.");
       return;
     }
-    if (endDate < startDate) {
-      setError("La fecha fin no puede ser anterior a la fecha inicio.");
-      return;
-    }
     if (!reason.trim()) {
       setError("Ingresa el motivo o detalle de la justificación.");
       return;
     }
     if (selectedAbsences.length === 0) {
-      setError("El periodo seleccionado no contiene inasistencias pendientes.");
+      setError("La fecha seleccionada no contiene inasistencias pendientes.");
       return;
     }
 
     const formData = new FormData();
     formData.append("staff_member_id", String(staffMemberId));
-    formData.append("start_date", startDate);
-    formData.append("end_date", endDate);
+    formData.append("start_date", justificationDate);
+    formData.append("end_date", justificationDate);
     formData.append("norm_code", normCode);
     formData.append("with_pay", normCode === "LG" ? "Y" : "N");
     formData.append("reason", reason.trim());
@@ -2265,25 +2258,13 @@ function JustificationsPage() {
               </select>
             </label>
             <label className="form-field">
-              <span>Fecha Inicio</span>
+              <span>Fecha</span>
               <input
                 disabled={!staffMemberId}
-                max={endDate}
-                onChange={(event) => setStartDate(event.target.value)}
+                onChange={(event) => setJustificationDate(event.target.value)}
                 required
                 type="date"
-                value={startDate}
-              />
-            </label>
-            <label className="form-field">
-              <span>Fecha Fin</span>
-              <input
-                disabled={!staffMemberId}
-                min={startDate}
-                onChange={(event) => setEndDate(event.target.value)}
-                required
-                type="date"
-                value={endDate}
+                value={justificationDate}
               />
             </label>
             <label className="form-field">
@@ -2329,7 +2310,7 @@ function JustificationsPage() {
           </div>
           <p className="subtle-inline">
             {selectedAbsences.length > 0
-              ? `${selectedAbsences.length} inasistencia(s) pendiente(s) incluida(s) en el periodo.`
+              ? `${selectedAbsences.length} inasistencia(s) pendiente(s) para la fecha seleccionada.`
               : "Selecciona una inasistencia de la tabla para habilitar el registro."}
           </p>
           <div className="justification-actions">
