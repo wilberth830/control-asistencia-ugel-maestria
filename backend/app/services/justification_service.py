@@ -6,6 +6,7 @@ from copy import deepcopy
 from datetime import date
 from typing import Any
 
+from app.core.runtime import use_memory_fallback
 from app.repositories.justification_repository import justification_repository
 from app.repositories.oracle import OracleRepositoryError
 from app.services.attendance_service import attendance_service
@@ -30,27 +31,28 @@ class JustificationService:
 
     def create(self, data: dict[str, Any]) -> dict[str, Any]:
         payload = self._validated_payload(data)
+        attendance_status = self._attendance_status(payload["norm_code"])
         try:
-            item = justification_repository.create(payload)
-            attendance_service.apply_justification_range(
-                justification_id=item["id"],
-                staff_member_id=item["staff_member_id"],
-                start_date=date.fromisoformat(item["start_date"]),
-                end_date=date.fromisoformat(item["end_date"]),
-            )
+            item = justification_repository.create(payload, attendance_status)
+            if item is None:
+                raise JustificationValidationError("no_absences_in_range")
             return item
-        except OracleRepositoryError:
-            pass
+        except OracleRepositoryError as exc:
+            use_memory_fallback("justification create", exc)
 
         self._seq += 1
         item = {**payload, "id": self._seq, "status": "active"}
         self._items[self._seq] = item
-        attendance_service.apply_justification_range(
+        changed = attendance_service.apply_justification_range(
             justification_id=item["id"],
             staff_member_id=item["staff_member_id"],
             start_date=date.fromisoformat(item["start_date"]),
             end_date=date.fromisoformat(item["end_date"]),
+            status=attendance_status,
         )
+        if not changed:
+            self._items.pop(item["id"], None)
+            raise JustificationValidationError("no_absences_in_range")
         return deepcopy(item)
 
     def update(self, justification_id: int, data: dict[str, Any]) -> dict[str, Any]:
@@ -72,10 +74,11 @@ class JustificationService:
                 staff_member_id=item["staff_member_id"],
                 start_date=date.fromisoformat(item["start_date"]),
                 end_date=date.fromisoformat(item["end_date"]),
+                status=self._attendance_status(item["norm_code"]),
             )
             return {"old": old_item, "new": item}
-        except OracleRepositoryError:
-            pass
+        except OracleRepositoryError as exc:
+            use_memory_fallback("justification update", exc)
 
         item = self._find(justification_id)
         old_item = deepcopy(item)
@@ -86,6 +89,7 @@ class JustificationService:
             staff_member_id=item["staff_member_id"],
             start_date=date.fromisoformat(item["start_date"]),
             end_date=date.fromisoformat(item["end_date"]),
+            status=self._attendance_status(item["norm_code"]),
         )
         return {"old": old_item, "new": deepcopy(item)}
 
@@ -94,8 +98,8 @@ class JustificationService:
     ) -> list[dict[str, Any]]:
         try:
             return justification_repository.list(staff_member_id, status)
-        except OracleRepositoryError:
-            pass
+        except OracleRepositoryError as exc:
+            use_memory_fallback("justification list", exc)
 
         rows = list(self._items.values())
         if staff_member_id:
@@ -111,8 +115,8 @@ class JustificationService:
             item = justification_repository.get(justification_id)
             if item is not None:
                 return item
-        except OracleRepositoryError:
-            pass
+        except OracleRepositoryError as exc:
+            use_memory_fallback("justification lookup", exc)
         return deepcopy(self._find(justification_id))
 
     def cancel(self, justification_id: int, reason: str) -> dict[str, Any]:
@@ -125,8 +129,8 @@ class JustificationService:
             attendance_service.cancel_justification(justification_id)
             item["cancel_reason"] = reason
             return item
-        except OracleRepositoryError:
-            pass
+        except OracleRepositoryError as exc:
+            use_memory_fallback("justification cancellation", exc)
 
         item = self._find(justification_id)
         item["status"] = "cancelled"
@@ -154,8 +158,12 @@ class JustificationService:
         if not isinstance(staff_member_id, int) or staff_member_id <= 0:
             raise JustificationValidationError("invalid_staff_member")
         norm_code = str(data.get("norm_code", "")).strip().upper()
-        if not norm_code or len(norm_code) > 10:
+        if norm_code not in {"LG", "LS", "P", "J", "H", "F", "LIC", "PER"}:
             raise JustificationValidationError("invalid_norm_code")
+        if norm_code == "LG":
+            with_pay = "Y"
+        elif norm_code in {"LS", "P", "J", "H", "F"}:
+            with_pay = "N"
         reason = data.get("reason")
         if isinstance(reason, str):
             reason = reason.strip() or None
@@ -175,6 +183,13 @@ class JustificationService:
             return date.fromisoformat(value)
         except ValueError as exc:
             raise JustificationValidationError("invalid_date") from exc
+
+    def _attendance_status(self, norm_code: str) -> str:
+        if norm_code in {"LG", "LS", "LIC"}:
+            return "leave"
+        if norm_code in {"P", "PER"}:
+            return "permission"
+        return "justified"
 
 
 justification_service = JustificationService()

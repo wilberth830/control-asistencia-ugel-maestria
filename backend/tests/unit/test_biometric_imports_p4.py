@@ -300,12 +300,14 @@ def test_confirmed_import_can_be_filtered_from_attendance(
 
     assert attendance_response.status_code == 200
     payload = attendance_response.json()
-    assert len(payload) == 2
+    assert len(payload) == 8
     assert {row["attendance_date"] for row in payload} == {
         "2026-07-01",
         "2026-07-02",
     }
     assert all(row["biometric_import_id"] == import_id for row in payload)
+    assert sum(row["status"] == "present" for row in payload) == 2
+    assert sum(row["status"] == "absent" for row in payload) == 6
 
 
 def test_confirmed_import_list_excludes_cancelled_imports(
@@ -315,15 +317,21 @@ def test_confirmed_import_list_excludes_cancelled_imports(
     confirmed_id = create_import(client, auth_headers).json()["id"]
     cancelled_id = create_import(client, auth_headers).json()["id"]
 
-    assert client.post(
-        f"/api/v1/biometric-imports/{confirmed_id}/confirmation",
-        headers=auth_headers,
-    ).status_code == 200
-    assert client.post(
-        f"/api/v1/biometric-imports/{cancelled_id}/cancellation",
-        json={"reason": "Archivo incorrecto"},
-        headers=auth_headers,
-    ).status_code == 200
+    assert (
+        client.post(
+            f"/api/v1/biometric-imports/{confirmed_id}/confirmation",
+            headers=auth_headers,
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/api/v1/biometric-imports/{cancelled_id}/cancellation",
+            json={"reason": "Archivo incorrecto"},
+            headers=auth_headers,
+        ).status_code
+        == 200
+    )
 
     response = client.get(
         "/api/v1/biometric-imports",
@@ -421,10 +429,7 @@ def test_import_history_can_be_limited_to_latest_rows(
     auth_headers: dict[str, str],
 ) -> None:
     client = TestClient(app)
-    created_ids = [
-        create_import(client, auth_headers).json()["id"]
-        for _ in range(12)
-    ]
+    created_ids = [create_import(client, auth_headers).json()["id"] for _ in range(12)]
 
     list_response = client.get(
         "/api/v1/biometric-imports?limit=10", headers=auth_headers

@@ -53,7 +53,9 @@ class JustificationRepository:
         except oracledb.Error as exc:
             raise OracleRepositoryError("Justification lookup failed") from exc
 
-    def create(self, data: dict[str, Any]) -> dict[str, Any]:
+    def create(
+        self, data: dict[str, Any], attendance_status: str
+    ) -> dict[str, Any] | None:
         sql = """
             INSERT INTO justification (
                 staff_member_id, start_date, end_date, norm_code, with_pay,
@@ -69,8 +71,30 @@ class JustificationRepository:
                 with connection.cursor() as cursor:
                     new_id = cursor.var(oracledb.NUMBER)
                     cursor.execute(sql, id=new_id, **self._payload(data))
+                    justification_id = int(new_id.getvalue()[0])
+                    cursor.execute(
+                        """
+                        UPDATE attendance_day
+                           SET status = :attendance_status,
+                               late_minutes = 0,
+                               justification_id = :justification_id
+                         WHERE staff_member_id = :staff_member_id
+                           AND attendance_date >= :start_date
+                           AND attendance_date <= :end_date
+                           AND status = 'absent'
+                           AND justification_id IS NULL
+                        """,
+                        attendance_status=attendance_status,
+                        justification_id=justification_id,
+                        staff_member_id=data["staff_member_id"],
+                        start_date=date.fromisoformat(data["start_date"]),
+                        end_date=date.fromisoformat(data["end_date"]),
+                    )
+                    if cursor.rowcount == 0:
+                        connection.rollback()
+                        return None
                 connection.commit()
-                return self.get(int(new_id.getvalue()[0]))
+                return self.get(justification_id)
         except oracledb.Error as exc:
             raise OracleRepositoryError("Justification create failed") from exc
 
