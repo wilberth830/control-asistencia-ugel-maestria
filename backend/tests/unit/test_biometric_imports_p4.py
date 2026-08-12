@@ -5,7 +5,9 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import settings
 from app.main import app
+from app.repositories.biometric_repository import biometric_repository
 from app.services.ai_biometric_normalizer_service import AINormalizationResult
 from app.services.attendance_service import attendance_service
 from app.services.biometric_import_service import biometric_import_service
@@ -49,7 +51,11 @@ BAT_CONTENT = rb"""
 
 
 @pytest.fixture(autouse=True)
-def reset_demo_data() -> None:
+def reset_demo_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "oracle_user", "")
+    monkeypatch.setattr(settings, "oracle_password", "")
+    monkeypatch.setattr(settings, "oracle_dsn", "")
+    monkeypatch.setattr(settings, "app_allow_memory_data", True)
     staff_member_service.reset_demo_data()
     biometric_import_service.reset()
     attendance_service.reset()
@@ -308,6 +314,41 @@ def test_confirmed_import_can_be_filtered_from_attendance(
     assert all(row["biometric_import_id"] == import_id for row in payload)
     assert sum(row["status"] == "present" for row in payload) == 2
     assert sum(row["status"] == "absent" for row in payload) == 6
+
+
+def test_confirm_is_idempotent_after_success(
+    auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = TestClient(app)
+    import_id = create_import(client, auth_headers).json()["id"]
+
+    first_response = client.post(
+        f"/api/v1/biometric-imports/{import_id}/confirmation",
+        headers=auth_headers,
+    )
+    second_response = client.post(
+        f"/api/v1/biometric-imports/{import_id}/confirmation",
+        headers=auth_headers,
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert second_response.json()["status"] == "confirmed"
+
+    confirmed_import = first_response.json()
+    biometric_import_service.reset()
+    monkeypatch.setattr(
+        biometric_repository,
+        "get_import",
+        lambda persisted_id: confirmed_import if persisted_id == import_id else None,
+    )
+    recovery_response = client.post(
+        f"/api/v1/biometric-imports/{import_id}/confirmation",
+        headers=auth_headers,
+    )
+
+    assert recovery_response.status_code == 200
+    assert recovery_response.json()["status"] == "confirmed"
 
 
 def test_confirmed_import_list_excludes_cancelled_imports(

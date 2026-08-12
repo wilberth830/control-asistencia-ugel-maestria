@@ -135,6 +135,43 @@ class BiometricRepository:
         except oracledb.Error as exc:
             raise OracleRepositoryError("Biometric import update failed") from exc
 
+    def cancel_import(self, import_id: int) -> dict[str, Any] | None:
+        """Cancel an import and atomically revert all data produced by it."""
+        try:
+            with oracle_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "DELETE FROM attendance_day WHERE biometric_import_id = :id",
+                        id=import_id,
+                    )
+                    cursor.execute(
+                        """
+                        DELETE FROM inconsistency
+                        WHERE mark_id IN (
+                            SELECT id FROM biometric_mark
+                            WHERE biometric_import_id = :id
+                        )
+                        """,
+                        id=import_id,
+                    )
+                    cursor.execute(
+                        "DELETE FROM biometric_mark WHERE biometric_import_id = :id",
+                        id=import_id,
+                    )
+                    cursor.execute(
+                        "UPDATE biometric_import SET status = 'cancelled' WHERE id = :id",
+                        id=import_id,
+                    )
+                    if cursor.rowcount == 0:
+                        connection.rollback()
+                        return None
+                connection.commit()
+            return self.get_import(import_id)
+        except oracledb.Error as exc:
+            raise OracleRepositoryError(
+                "Biometric import cancellation failed"
+            ) from exc
+
     def insert_mark(
         self,
         *,

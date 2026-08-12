@@ -133,9 +133,16 @@ class BiometricImportService:
 
     def confirm(self, import_id: int) -> dict[str, Any]:
         from app.services.attendance_service import attendance_service
-        from app.services.inconsistency_service import inconsistency_service
 
-        imp = self._find(import_id)
+        try:
+            imp = self._find(import_id)
+        except BiometricImportError:
+            persisted = biometric_repository.get_import(import_id)
+            if persisted and persisted["status"] == "confirmed":
+                return persisted
+            raise
+        if imp["status"] == "confirmed":
+            return deepcopy(imp)
         if imp["status"] != "draft":
             raise BiometricImportError("conflict_not_draft")
         registered_dnis: set[str] = set()
@@ -206,10 +213,6 @@ class BiometricImportService:
                 imp.update(persisted)
         except OracleRepositoryError as exc:
             use_memory_fallback("biometric import confirmation", exc)
-        try:
-            inconsistency_service.analyze_and_persist(imp["id"])
-        except OracleRepositoryError as exc:
-            use_memory_fallback("inconsistency persistence", exc)
         return deepcopy(imp)
 
     def cancel(self, import_id: int, reason: str) -> dict[str, Any]:
