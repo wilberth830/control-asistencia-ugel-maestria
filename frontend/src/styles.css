@@ -925,6 +925,18 @@ tbody tr:last-child td {
   color: var(--danger);
 }
 
+.day-cell.empty {
+  background: #f8fafc;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.day-cell.empty:hover {
+  background: var(--primary-soft);
+  border-color: #93c5fd;
+  color: var(--primary);
+}
+
 .day-cell.justified,
 .day-cell.leave,
 .day-cell.permission {

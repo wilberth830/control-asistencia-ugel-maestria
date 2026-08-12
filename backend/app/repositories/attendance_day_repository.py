@@ -141,24 +141,94 @@ class AttendanceDayRepository:
     def list_by_import(
         self, import_id: int, *, month: int | None = None, year: int | None = None
     ) -> list[dict[str, Any]]:
-        period_filter = ""
+        mark_period_filter = ""
+        attendance_period_filter = ""
         params: dict[str, Any] = {"import_id": import_id}
         if month and year:
             start_date = date(year, month, 1)
             end_date = date(year + int(month == 12), 1 if month == 12 else month + 1, 1)
-            period_filter = """
-              AND attendance_date >= :start_date
-              AND attendance_date < :end_date
+            mark_period_filter = """
+              AND bm.marked_at >= :start_date
+              AND bm.marked_at < :end_date
+            """
+            attendance_period_filter = """
+              AND ad.attendance_date >= :start_date
+              AND ad.attendance_date < :end_date
             """
             params.update({"start_date": start_date, "end_date": end_date})
-        sql = f"""
-            SELECT id, staff_member_id, biometric_import_id, attendance_date,
-                   status, late_minutes, justification_id
-            FROM attendance_day
-            WHERE biometric_import_id = :import_id
-            {period_filter}
+        sql = """
+            WITH mark_days AS (
+                SELECT
+                    bm.staff_member_id,
+                    bm.biometric_import_id,
+                    TRUNC(bm.marked_at) AS attendance_date,
+                    MIN(COALESCE(scoped.id, generic.id)) AS attendance_id,
+                    MAX(COALESCE(scoped.status, generic.status, 'present'))
+                        KEEP (DENSE_RANK LAST ORDER BY bm.marked_at) AS status,
+                    MAX(COALESCE(scoped.late_minutes, generic.late_minutes, 0))
+                        AS late_minutes,
+                    MAX(COALESCE(scoped.justification_id, generic.justification_id))
+                        AS justification_id
+                FROM biometric_mark bm
+                LEFT JOIN attendance_day scoped
+                  ON scoped.staff_member_id = bm.staff_member_id
+                 AND scoped.attendance_date = TRUNC(bm.marked_at)
+                 AND scoped.biometric_import_id = bm.biometric_import_id
+                LEFT JOIN attendance_day generic
+                  ON generic.staff_member_id = bm.staff_member_id
+                 AND generic.attendance_date = TRUNC(bm.marked_at)
+                 AND generic.biometric_import_id IS NULL
+                WHERE bm.biometric_import_id = :import_id
+                {mark_period_filter}
+                GROUP BY bm.staff_member_id, bm.biometric_import_id, TRUNC(bm.marked_at)
+            ),
+            manual_days AS (
+                SELECT
+                    ad.id,
+                    ad.staff_member_id,
+                    ad.biometric_import_id,
+                    ad.attendance_date,
+                    ad.status,
+                    ad.late_minutes,
+                    ad.justification_id
+                FROM attendance_day ad
+                WHERE ad.biometric_import_id = :import_id
+                {attendance_period_filter}
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM mark_days md
+                      WHERE md.staff_member_id = ad.staff_member_id
+                        AND md.biometric_import_id = ad.biometric_import_id
+                        AND md.attendance_date = ad.attendance_date
+                  )
+            )
+            SELECT
+                COALESCE(
+                    attendance_id,
+                    -ROW_NUMBER() OVER (ORDER BY attendance_date, staff_member_id)
+                ) AS id,
+                staff_member_id,
+                biometric_import_id,
+                attendance_date,
+                status,
+                late_minutes,
+                justification_id
+            FROM mark_days
+            UNION ALL
+            SELECT
+                id,
+                staff_member_id,
+                biometric_import_id,
+                attendance_date,
+                status,
+                late_minutes,
+                justification_id
+            FROM manual_days
             ORDER BY attendance_date, staff_member_id
-        """
+        """.format(
+            mark_period_filter=mark_period_filter,
+            attendance_period_filter=attendance_period_filter,
+        )
         try:
             with oracle_connection() as connection:
                 with connection.cursor() as cursor:

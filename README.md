@@ -98,7 +98,7 @@ ejecutar-bd.bat
 El instalador ejecuta en orden: schema, tablas, índices, seed y checks. Puede correrse varias veces sin duplicar datos.
 
 ### 3. Backend
-
+```
 cd backend
 pip install -r requirements.txt
 python -m uvicorn app.main:app --reload --port 8000

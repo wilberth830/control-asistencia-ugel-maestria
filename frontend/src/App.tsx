@@ -1692,11 +1692,13 @@ function AttendancePage() {
         },
       );
       setAttendanceRows((rows) =>
-        rows.map((row) =>
-          sameAttendanceKey(row, response.data, selectedImportId)
-            ? response.data
-            : row,
-        ),
+        rows.some((row) => sameAttendanceKey(row, response.data, selectedImportId))
+          ? rows.map((row) =>
+              sameAttendanceKey(row, response.data, selectedImportId)
+                ? response.data
+                : row,
+            )
+          : [...rows, response.data],
       );
       setSelectedDay(response.data);
       setLockedDayKey(dayKey);
@@ -3025,24 +3027,32 @@ function AttendanceMonthGrid({
                   </td>
                   {days.map((day) => {
                     const row = rowsByStaff[staffId]?.[day];
+                    const attendanceDate = `${year}-${String(month).padStart(2, "0")}-${String(
+                      day,
+                    ).padStart(2, "0")}`;
+                    const draftRow: AttendanceDay = row ?? {
+                      id: 0,
+                      staff_member_id: staffId,
+                      biometric_import_id: null,
+                      attendance_date: attendanceDate,
+                      status: "present",
+                      late_minutes: 0,
+                      justification_id: null,
+                    };
                     return (
                       <td key={day}>
-                        {row ? (
-                          <button
-                            className={`day-cell ${row.status} ${
-                              selectedDayKey ===
-                              `${row.staff_member_id}-${row.attendance_date}`
-                                ? "selected"
-                                : ""
-                            }`}
-                            onClick={() => onSelect(row)}
-                            type="button"
-                          >
-                            {attendanceStatusShort(row.status)}
-                          </button>
-                        ) : (
-                          <span className="day-empty">-</span>
-                        )}
+                        <button
+                          className={`day-cell ${row ? row.status : "empty"} ${
+                            selectedDayKey ===
+                            `${draftRow.staff_member_id}-${draftRow.attendance_date}`
+                              ? "selected"
+                              : ""
+                          }`}
+                          onClick={() => onSelect(draftRow)}
+                          type="button"
+                        >
+                          {row ? attendanceStatusShort(row.status) : "-"}
+                        </button>
                       </td>
                     );
                   })}
