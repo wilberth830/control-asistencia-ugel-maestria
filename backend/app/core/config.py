@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 720
     app_use_demo_store: bool = True
     app_allow_memory_session: bool = True
+    app_allow_memory_data: bool = True
 
     support_files_dir: str = "storage/support_files"
     support_file_max_bytes: int = 5 * 1024 * 1024
