@@ -1968,10 +1968,13 @@ function JustificationsPage() {
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
   const [justifications, setJustifications] = useState<Justification[]>([]);
   const [absences, setAbsences] = useState<AttendanceDay[]>([]);
+  const [absenceImports, setAbsenceImports] = useState<BiometricImport[]>([]);
   const [absenceMonth, setAbsenceMonth] = useState(initialMonth);
   const [absenceYear, setAbsenceYear] = useState(initialYear);
+  const [absenceImportId, setAbsenceImportId] = useState(0);
   const [loadedAbsenceMonth, setLoadedAbsenceMonth] = useState(initialMonth);
   const [loadedAbsenceYear, setLoadedAbsenceYear] = useState(initialYear);
+  const [loadedAbsenceImportId, setLoadedAbsenceImportId] = useState(0);
   const [absencesLoading, setAbsencesLoading] = useState(true);
   const [staffMemberId, setStaffMemberId] = useState(0);
   const [justificationDate, setJustificationDate] = useState(localDate);
@@ -1996,11 +1999,17 @@ function JustificationsPage() {
       apiClient.get<AttendanceDay[]>("/api/v1/attendance-records", {
         params: { month: initialMonth, year: initialYear },
       }),
+      apiClient.get<BiometricImport[]>("/api/v1/biometric-imports"),
     ])
-      .then(([staff, response, attendanceResponse]) => {
+      .then(([staff, response, attendanceResponse, importsResponse]) => {
         if (!active) return;
         setStaffMembers(staff);
         setJustifications(response.data);
+        setAbsenceImports(
+          sortAttendanceImports(
+            importsResponse.data.filter((item) => item.status === "confirmed"),
+          ),
+        );
         setAbsences(
           attendanceResponse.data.filter(
             (item) => item.status === "absent" && item.justification_id === null,
@@ -2029,14 +2038,28 @@ function JustificationsPage() {
       item.attendance_date === justificationDate,
   );
   const absenceYears = Array.from({ length: 7 }, (_, index) => initialYear + 1 - index);
+  const monthAbsenceImports = absenceImports.filter((item) =>
+    importTouchesPeriod(item, absenceMonth, absenceYear),
+  );
 
-  const loadAbsences = async (month = absenceMonth, year = absenceYear) => {
+  const loadAbsences = async (
+    month = absenceMonth,
+    year = absenceYear,
+    importId = absenceImportId,
+  ) => {
     setAbsencesLoading(true);
     setError("");
+    setStaffMemberId(0);
     try {
       const response = await apiClient.get<AttendanceDay[]>(
         "/api/v1/attendance-records",
-        { params: { month, year } },
+        {
+          params: {
+            month,
+            year,
+            import_id: importId || undefined,
+          },
+        },
       );
       setAbsences(
         response.data.filter(
@@ -2045,6 +2068,7 @@ function JustificationsPage() {
       );
       setLoadedAbsenceMonth(month);
       setLoadedAbsenceYear(year);
+      setLoadedAbsenceImportId(importId);
     } catch {
       setAbsences([]);
       setError("No se pudieron cargar las inasistencias pendientes.");
@@ -2117,7 +2141,11 @@ function JustificationsPage() {
       setFileInputKey((current) => current + 1);
       setStaffMemberId(0);
       setMessage("La justificación se registró correctamente.");
-      await loadAbsences(loadedAbsenceMonth, loadedAbsenceYear);
+      await loadAbsences(
+        loadedAbsenceMonth,
+        loadedAbsenceYear,
+        loadedAbsenceImportId,
+      );
     } catch {
       setError(
         "No se pudo registrar la justificación. Revisa los datos y el sustento.",
@@ -2173,7 +2201,11 @@ function JustificationsPage() {
       setItemToCancel(null);
       setCancelReason("");
       setMessage("La justificación fue anulada correctamente.");
-      await loadAbsences(loadedAbsenceMonth, loadedAbsenceYear);
+      await loadAbsences(
+        loadedAbsenceMonth,
+        loadedAbsenceYear,
+        loadedAbsenceImportId,
+      );
     } catch {
       setError("No se pudo anular la justificación.");
     } finally {
@@ -2206,7 +2238,20 @@ function JustificationsPage() {
             <label className="form-field">
               <span>Mes</span>
               <select
-                onChange={(event) => setAbsenceMonth(Number(event.target.value))}
+                onChange={(event) => {
+                  const nextMonth = Number(event.target.value);
+                  setAbsenceMonth(nextMonth);
+                  if (
+                    absenceImportId &&
+                    !absenceImports.some(
+                      (item) =>
+                        item.id === absenceImportId &&
+                        importTouchesPeriod(item, nextMonth, absenceYear),
+                    )
+                  ) {
+                    setAbsenceImportId(0);
+                  }
+                }}
                 value={absenceMonth}
               >
                 {monthOptions.map((item) => (
@@ -2217,7 +2262,20 @@ function JustificationsPage() {
             <label className="form-field">
               <span>Año</span>
               <select
-                onChange={(event) => setAbsenceYear(Number(event.target.value))}
+                onChange={(event) => {
+                  const nextYear = Number(event.target.value);
+                  setAbsenceYear(nextYear);
+                  if (
+                    absenceImportId &&
+                    !absenceImports.some(
+                      (item) =>
+                        item.id === absenceImportId &&
+                        importTouchesPeriod(item, absenceMonth, nextYear),
+                    )
+                  ) {
+                    setAbsenceImportId(0);
+                  }
+                }}
                 value={absenceYear}
               >
                 {absenceYears.map((year) => (
@@ -2225,8 +2283,22 @@ function JustificationsPage() {
                 ))}
               </select>
             </label>
+            <label className="form-field grow">
+              <span>Archivo</span>
+              <select
+                onChange={(event) => setAbsenceImportId(Number(event.target.value))}
+                value={absenceImportId}
+              >
+                <option value={0}>Todos los archivos del mes</option>
+                {monthAbsenceImports.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    #{item.id} · {item.file_name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button className="btn btn-primary" disabled={absencesLoading} type="submit">
-              {absencesLoading ? "Cargando" : "Buscar inasistencias"}
+              {absencesLoading ? "Cargando" : "Filtrar"}
             </button>
           </form>
         </div>
@@ -2587,63 +2659,56 @@ function ReportsPage() {
     };
   }, [month, year]);
 
-  // Carga automática al cambiar mes / año / anexo
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setError("");
-      try {
-        const params = {
-          month,
-          year,
-          format: "json",
-          import_id: selectedImportId || undefined,
-        } as const;
-        if (cancelled) return;
-        if (annex === "03") {
-          const response = await apiClient.get<Annex03Report>(
-            "/api/v1/reports/annex-03",
-            { params },
-          );
-          if (cancelled) return;
-          const data = response.data;
-          syncHeader(data.institution);
-          setPreview({
-            type: "03",
-            rows: (data.rows || []).map((row) => ({
-              dni: row.dni || "",
-              full_name: row.full_name || "",
-              days: row.days || [],
-            })),
-          });
-        } else {
-          const response = await apiClient.get<Annex04Report>(
-            "/api/v1/reports/annex-04",
-            { params },
-          );
-          if (cancelled) return;
-          const data = response.data;
-          syncHeader(data.institution);
-          setPreview({
-            type: "04",
-            totals: data.totals || {},
-            staff_count: data.staff_count ?? 0,
-          });
-        }
-      } catch {
-        if (!cancelled) {
-          setError("No se pudo cargar la vista previa");
-          setPreview(null);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+  const loadPreview = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const params = {
+        month,
+        year,
+        format: "json",
+        import_id: selectedImportId || undefined,
+      } as const;
+      if (annex === "03") {
+        const response = await apiClient.get<Annex03Report>(
+          "/api/v1/reports/annex-03",
+          { params },
+        );
+        const data = response.data;
+        syncHeader(data.institution);
+        setPreview({
+          type: "03",
+          rows: (data.rows || []).map((row) => ({
+            dni: row.dni || "",
+            full_name: row.full_name || "",
+            days: row.days || [],
+          })),
+        });
+      } else {
+        const response = await apiClient.get<Annex04Report>(
+          "/api/v1/reports/annex-04",
+          { params },
+        );
+        const data = response.data;
+        syncHeader(data.institution);
+        setPreview({
+          type: "04",
+          totals: data.totals || {},
+          staff_count: data.staff_count ?? 0,
+        });
       }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
+    } catch {
+      setError("No se pudo cargar la vista previa");
+      setPreview(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Al cambiar filtros se limpia la vista; hay que pulsar Generar de nuevo
+  useEffect(() => {
+    setPreview(null);
+    setError("");
   }, [month, year, annex, selectedImportId]);
 
   const exportExcel = async () => {
@@ -2705,7 +2770,7 @@ function ReportsPage() {
     <>
       <PageHeader
         title="Reportes oficiales"
-        description="Anexo 03 y 04 · vista previa automática · exportar Excel listo para imprimir"
+        description="Anexo 03 y 04 · generar vista previa · exportar Excel listo para imprimir"
       />
       {/* Barra superior: filtros + exportar */}
       <div className="report-toolbar">
@@ -2759,6 +2824,14 @@ function ReportsPage() {
               onClick={() => setShowHeaderEdit((v) => !v)}
             >
               {showHeaderEdit ? "Ocultar cabecera" : "Editar cabecera"}
+            </button>
+            <button
+              className="btn btn-sm"
+              type="button"
+              disabled={loading}
+              onClick={loadPreview}
+            >
+              {loading ? "Generando…" : "Generar vista previa"}
             </button>
             <button
               className="btn btn-sm btn-primary"
