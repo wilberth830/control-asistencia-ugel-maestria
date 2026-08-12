@@ -3147,6 +3147,7 @@ function AttendanceMonthGrid({
       <table className="attendance-month-table">
         <thead>
           <tr>
+            <th className="sticky-row-number sticky-head">N°</th>
             <th className="sticky-name sticky-head">Personal</th>
             {days.map((day) => (
               <th key={day}>{String(day).padStart(2, "0")}</th>
@@ -3155,10 +3156,11 @@ function AttendanceMonthGrid({
         </thead>
         <tbody>
           {staffIds.length ? (
-            staffIds.map((staffId) => {
+            staffIds.map((staffId, index) => {
               const staff = staffById[staffId];
               return (
                 <tr key={staffId}>
+                  <td className="sticky-row-number">{index + 1}</td>
                   <td className="sticky-name">
                     {staff
                       ? `${staff.last_names}, ${staff.first_names}`
@@ -3200,7 +3202,7 @@ function AttendanceMonthGrid({
             })
           ) : (
             <tr>
-              <td colSpan={days.length + 1}>Sin asistencia para este archivo</td>
+              <td colSpan={days.length + 2}>Sin asistencia para este archivo</td>
             </tr>
           )}
         </tbody>

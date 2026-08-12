@@ -976,13 +976,26 @@ tbody tr:last-child td {
   text-align: center;
 }
 
+.attendance-month-table .sticky-row-number,
 .attendance-month-table .sticky-name {
   background: var(--surface);
-  left: 0;
-  min-width: 190px;
   position: sticky;
-  text-align: left;
   z-index: 2;
+}
+
+.attendance-month-table .sticky-row-number {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  left: 0;
+  min-width: 34px;
+  width: 34px;
+}
+
+.attendance-month-table .sticky-name {
+  left: 42px;
+  min-width: 190px;
+  text-align: left;
 }
 
 .attendance-month-table thead th {
@@ -991,6 +1004,7 @@ tbody tr:last-child td {
   z-index: 3;
 }
 
+.attendance-month-table thead .sticky-row-number,
 .attendance-month-table thead .sticky-name {
   background: #f8fafc;
   z-index: 4;
