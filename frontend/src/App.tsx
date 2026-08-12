@@ -416,6 +416,8 @@ function Shell({
 }) {
   const location = useLocation();
   const [loggingOut, setLoggingOut] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
   const title = navigationItems.find((item) =>
     location.pathname.startsWith(item.to),
   )?.label;
@@ -424,7 +426,28 @@ function Shell({
     void loadStaffMembers().catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    if (!userMenuOpen) return;
+
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!userMenuRef.current?.contains(event.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setUserMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [userMenuOpen]);
+
   const logout = async () => {
+    setUserMenuOpen(false);
     setLoggingOut(true);
     try {
       await apiClient.delete("/api/v1/auth/sessions/current");
@@ -461,22 +484,43 @@ function Shell({
         <header className="header">
           <div className="header-left">{title ?? "Dashboard"}</div>
           <div className="header-right">
-            <div className="user-info">
-              <div className="user-avatar">{session.username.slice(0, 2).toUpperCase()}</div>
-              <div className="user-meta">
-                <div>{session.username}</div>
-                <div className="role">{session.role}</div>
-              </div>
+            <div className="user-menu" ref={userMenuRef}>
+              <button
+                aria-expanded={userMenuOpen}
+                aria-haspopup="menu"
+                className="user-menu-trigger"
+                onClick={() => setUserMenuOpen((open) => !open)}
+                type="button"
+              >
+                <span className="user-avatar">
+                  {session.username.slice(0, 2).toUpperCase()}
+                </span>
+                <span className="user-meta">
+                  <span>{session.username}</span>
+                  <span className="role">{session.role}</span>
+                </span>
+                <span
+                  aria-hidden="true"
+                  className={`user-menu-chevron${userMenuOpen ? " open" : ""}`}
+                >
+                  ▾
+                </span>
+              </button>
+              {userMenuOpen && (
+                <div className="user-menu-dropdown" role="menu">
+                  <button
+                    className="user-menu-option user-menu-logout"
+                    disabled={loggingOut}
+                    onClick={logout}
+                    role="menuitem"
+                    type="button"
+                  >
+                    {loggingOut && <span className="btn-spinner" />}
+                    <span>{loggingOut ? "Saliendo" : "Salir"}</span>
+                  </button>
+                </div>
+              )}
             </div>
-            <button
-              className="btn btn-sm btn-ghost"
-              disabled={loggingOut}
-              type="button"
-              onClick={logout}
-            >
-              {loggingOut && <span className="btn-spinner" />}
-              {loggingOut ? "Saliendo" : "Salir"}
-            </button>
           </div>
         </header>
         <main className="content">
