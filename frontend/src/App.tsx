@@ -2612,63 +2612,56 @@ function ReportsPage() {
     };
   }, [month, year]);
 
-  // Carga automática al cambiar mes / año / anexo
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setError("");
-      try {
-        const params = {
-          month,
-          year,
-          format: "json",
-          import_id: selectedImportId || undefined,
-        } as const;
-        if (cancelled) return;
-        if (annex === "03") {
-          const response = await apiClient.get<Annex03Report>(
-            "/api/v1/reports/annex-03",
-            { params },
-          );
-          if (cancelled) return;
-          const data = response.data;
-          syncHeader(data.institution);
-          setPreview({
-            type: "03",
-            rows: (data.rows || []).map((row) => ({
-              dni: row.dni || "",
-              full_name: row.full_name || "",
-              days: row.days || [],
-            })),
-          });
-        } else {
-          const response = await apiClient.get<Annex04Report>(
-            "/api/v1/reports/annex-04",
-            { params },
-          );
-          if (cancelled) return;
-          const data = response.data;
-          syncHeader(data.institution);
-          setPreview({
-            type: "04",
-            totals: data.totals || {},
-            staff_count: data.staff_count ?? 0,
-          });
-        }
-      } catch {
-        if (!cancelled) {
-          setError("No se pudo cargar la vista previa");
-          setPreview(null);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+  const loadPreview = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const params = {
+        month,
+        year,
+        format: "json",
+        import_id: selectedImportId || undefined,
+      } as const;
+      if (annex === "03") {
+        const response = await apiClient.get<Annex03Report>(
+          "/api/v1/reports/annex-03",
+          { params },
+        );
+        const data = response.data;
+        syncHeader(data.institution);
+        setPreview({
+          type: "03",
+          rows: (data.rows || []).map((row) => ({
+            dni: row.dni || "",
+            full_name: row.full_name || "",
+            days: row.days || [],
+          })),
+        });
+      } else {
+        const response = await apiClient.get<Annex04Report>(
+          "/api/v1/reports/annex-04",
+          { params },
+        );
+        const data = response.data;
+        syncHeader(data.institution);
+        setPreview({
+          type: "04",
+          totals: data.totals || {},
+          staff_count: data.staff_count ?? 0,
+        });
       }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
+    } catch {
+      setError("No se pudo cargar la vista previa");
+      setPreview(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Al cambiar filtros se limpia la vista; hay que pulsar Generar de nuevo
+  useEffect(() => {
+    setPreview(null);
+    setError("");
   }, [month, year, annex, selectedImportId]);
 
   const exportExcel = async () => {
@@ -2730,7 +2723,7 @@ function ReportsPage() {
     <>
       <PageHeader
         title="Reportes oficiales"
-        description="Anexo 03 y 04 · vista previa automática · exportar Excel listo para imprimir"
+        description="Anexo 03 y 04 · generar vista previa · exportar Excel listo para imprimir"
       />
       {/* Barra superior: filtros + exportar */}
       <div className="report-toolbar">
@@ -2784,6 +2777,14 @@ function ReportsPage() {
               onClick={() => setShowHeaderEdit((v) => !v)}
             >
               {showHeaderEdit ? "Ocultar cabecera" : "Editar cabecera"}
+            </button>
+            <button
+              className="btn btn-sm"
+              type="button"
+              disabled={loading}
+              onClick={loadPreview}
+            >
+              {loading ? "Generando…" : "Generar vista previa"}
             </button>
             <button
               className="btn btn-sm btn-primary"
@@ -2944,6 +2945,7 @@ function ReportsPage() {
     </>
   );
 }
+
 
 function PageHeader({
   title,
