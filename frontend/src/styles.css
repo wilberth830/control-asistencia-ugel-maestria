@@ -525,8 +525,114 @@ select {
   display: flex;
 }
 
-.staff-filters {
-  justify-content: space-between;
+.staff-toolbar {
+  align-items: stretch;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+  margin-bottom: 12px;
+}
+
+.staff-metrics,
+.staff-controls {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.staff-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.staff-metrics div {
+  border-right: 1px solid var(--border);
+  padding: 12px 14px;
+}
+
+.staff-metrics div:last-child {
+  border-right: 0;
+}
+
+.staff-metrics span {
+  color: var(--text-muted);
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+.staff-metrics strong {
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.staff-controls {
+  align-items: flex-end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(240px, 1fr) 150px auto;
+  padding: 10px 12px;
+}
+
+.staff-search,
+.staff-status-filter {
+  margin-bottom: 0;
+}
+
+.staff-new-button {
+  height: 32px;
+}
+
+.staff-card .card-header {
+  min-height: 42px;
+}
+
+.staff-table-wrap {
+  max-height: calc(100vh - 260px);
+}
+
+.staff-table th,
+.staff-table td {
+  vertical-align: middle;
+}
+
+.staff-identity {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 260px;
+}
+
+.staff-identity strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.staff-identity small {
+  color: var(--text-muted);
+  display: block;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.staff-avatar-mini {
+  align-items: center;
+  background: var(--primary-soft);
+  border: 1px solid #bfdbfe;
+  border-radius: 50%;
+  color: var(--primary);
+  display: inline-flex;
+  flex: 0 0 34px;
+  font-size: 11px;
+  font-weight: 800;
+  height: 34px;
+  justify-content: center;
+  text-transform: uppercase;
+  width: 34px;
 }
 
 .staff-actions {
@@ -1530,6 +1636,32 @@ tbody tr:last-child td {
 
   .report-actions {
     margin-left: 0;
+  }
+
+  .staff-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .staff-controls {
+    grid-template-columns: minmax(220px, 1fr) 150px auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .staff-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .staff-new-button {
+    width: 100%;
+  }
+
+  .staff-metrics div {
+    padding: 10px;
+  }
+
+  .staff-metrics strong {
+    font-size: 18px;
   }
 }
 

@@ -669,6 +669,8 @@ function StaffPage() {
       .some((value) => value.toLowerCase().includes(query));
     return matchesSearch && (statusFilter === "all" || item.is_active === statusFilter);
   });
+  const activeCount = staffMembers.filter((item) => item.is_active === "Y").length;
+  const inactiveCount = staffMembers.length - activeCount;
 
   const saveStaff = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -734,26 +736,40 @@ function StaffPage() {
         title="Personal"
         description="Docentes y auxiliares registrados en la institución educativa"
       />
-      <div className="filters staff-filters">
-        <label className="form-field grow">
-          <span>Buscar</span>
-          <input
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="DNI, nombres o apellidos"
-            value={search}
-          />
-        </label>
-        <label className="form-field">
-          <span>Estado</span>
-          <select onChange={(event) => setStatusFilter(event.target.value as "all" | "Y" | "N")} value={statusFilter}>
-            <option value="all">Todos</option>
-            <option value="Y">Activos</option>
-            <option value="N">Inactivos</option>
-          </select>
-        </label>
-        <div className="filter-actions">
+      <section className="staff-toolbar">
+        <div className="staff-metrics" aria-label="Resumen de personal">
+          <div>
+            <span>Total</span>
+            <strong>{staffMembers.length}</strong>
+          </div>
+          <div>
+            <span>Activos</span>
+            <strong>{activeCount}</strong>
+          </div>
+          <div>
+            <span>Inactivos</span>
+            <strong>{inactiveCount}</strong>
+          </div>
+        </div>
+        <div className="staff-controls">
+          <label className="form-field staff-search">
+            <span>Buscar</span>
+            <input
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="DNI, apellidos, nombres o cargo"
+              value={search}
+            />
+          </label>
+          <label className="form-field staff-status-filter">
+            <span>Estado</span>
+            <select onChange={(event) => setStatusFilter(event.target.value as "all" | "Y" | "N")} value={statusFilter}>
+              <option value="Y">Activos</option>
+              <option value="all">Todos</option>
+              <option value="N">Inactivos</option>
+            </select>
+          </label>
           <button
-            className="btn btn-primary"
+            className="btn btn-primary staff-new-button"
             onClick={() => setEditingStaff({
               id: 0,
               dni: "",
@@ -768,17 +784,19 @@ function StaffPage() {
             Nuevo personal
           </button>
         </div>
-      </div>
+      </section>
       {message && <div className="alert-success">{message}</div>}
       {error && <div className="alert-danger">{error}</div>}
-      <section className="card">
-        <div className="card-header">Personal registrado</div>
-        <div className="table-wrap">
-          <table>
+      <section className="card staff-card">
+        <div className="card-header">
+          <span>Personal registrado</span>
+          <span className="subtle-inline">{visibleStaff.length} resultados</span>
+        </div>
+        <div className="table-wrap staff-table-wrap">
+          <table className="staff-table">
             <thead>
               <tr>
-                <th>DNI</th>
-                <th>Apellidos y nombres</th>
+                <th>Personal</th>
                 <th>Cargo</th>
                 <th>Condición</th>
                 <th>Estado</th>
@@ -787,11 +805,21 @@ function StaffPage() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="empty-cell">Cargando...</td></tr>
+                <tr><td colSpan={5} className="empty-cell">Cargando...</td></tr>
               ) : visibleStaff.length ? visibleStaff.map((item) => (
                 <tr key={item.id}>
-                  <td>{item.dni}</td>
-                  <td>{item.last_names}, {item.first_names}</td>
+                  <td>
+                    <div className="staff-identity">
+                      <div className="staff-avatar-mini">
+                        {item.last_names.slice(0, 1)}
+                        {item.first_names.slice(0, 1)}
+                      </div>
+                      <div>
+                        <strong>{item.last_names}, {item.first_names}</strong>
+                        <small>DNI {item.dni}</small>
+                      </div>
+                    </div>
+                  </td>
                   <td>{item.job_title}</td>
                   <td>{item.employment_status ?? "-"}</td>
                   <td>
@@ -815,7 +843,7 @@ function StaffPage() {
                   </td>
                 </tr>
               )) : (
-                <tr><td colSpan={6} className="empty-cell">Sin personal registrado</td></tr>
+                <tr><td colSpan={5} className="empty-cell">Sin personal registrado</td></tr>
               )}
             </tbody>
           </table>
@@ -1525,6 +1553,9 @@ function AttendancePage() {
   const [selectedImportId, setSelectedImportId] = useState(
     importId ? Number(importId) : 0,
   );
+  const [loadedImportId, setLoadedImportId] = useState(
+    importId ? Number(importId) : 0,
+  );
   const [allImports, setAllImports] = useState<BiometricImport[]>([]);
   const [monthImports, setMonthImports] = useState<BiometricImport[]>([]);
   const [attendanceRows, setAttendanceRows] = useState<AttendanceDay[]>([]);
@@ -1543,6 +1574,19 @@ function AttendancePage() {
     nextYear = year,
     nextImportId = selectedImportId,
   ) => {
+    if (!nextImportId) {
+      setAttendanceRows([]);
+      setLoadedMonth(nextMonth);
+      setLoadedYear(nextYear);
+      setLoadedImportId(0);
+      setSelectedDay(null);
+      setSelectedStatus("present");
+      setLateMinutes(0);
+      setLockedDayKey("");
+      setError("");
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -1562,6 +1606,7 @@ function AttendancePage() {
       setStaffMembers(staffResponse.data);
       setLoadedMonth(nextMonth);
       setLoadedYear(nextYear);
+      setLoadedImportId(nextImportId);
       setSelectedDay(null);
       setSelectedStatus("present");
       setLateMinutes(0);
@@ -1598,7 +1643,7 @@ function AttendancePage() {
         const nextImportId =
           importId && imports.some((item) => item.id === Number(importId))
             ? Number(importId)
-            : 0;
+            : importsForMonth[0]?.id ?? 0;
 
         setAllImports(imports);
         setMonth(selectedPeriod.month);
@@ -1641,7 +1686,7 @@ function AttendancePage() {
       importTouchesPeriod(item, nextMonth, nextYear),
     );
     const nextImportId = selectedImportId === 0 || importsForMonth.some((item) => item.id === selectedImportId)
-      ? selectedImportId
+      ? selectedImportId || (importsForMonth[0]?.id ?? 0)
       : importsForMonth[0]?.id ?? 0;
     setMonthImports(importsForMonth);
     setSelectedImportId(nextImportId);
@@ -1656,7 +1701,7 @@ function AttendancePage() {
       importTouchesPeriod(item, month, year),
     );
     const nextImportId = selectedImportId === 0 || importsForMonth.some((item) => item.id === selectedImportId)
-      ? selectedImportId
+      ? selectedImportId || (importsForMonth[0]?.id ?? 0)
       : importsForMonth[0]?.id ?? 0;
     setMonthImports(importsForMonth);
     setSelectedImportId(nextImportId);
@@ -1723,6 +1768,7 @@ function AttendancePage() {
   const availableYears = yearsFromImports(allImports, year);
   const availableMonths = monthsFromImports(allImports, year, month);
   const noMonthFiles = !loading && monthImports.length === 0;
+  const loadedImport = allImports.find((item) => item.id === loadedImportId) || null;
 
   return (
     <>
@@ -1785,7 +1831,7 @@ function AttendancePage() {
           >
             <option value="0">
               {monthImports.length
-                ? "Todos los archivos del mes"
+                ? "Seleccione un archivo"
                 : "Sin archivos para este mes"}
             </option>
             {monthImports.map((item) => (
@@ -1816,6 +1862,7 @@ function AttendancePage() {
         <section className="card attendance-grid">
           <div className="card-header">
             Asistencia cargada · {String(loadedMonth).padStart(2, "0")}/{loadedYear}
+            {loadedImport ? ` · #${loadedImport.id}` : ""}
           </div>
           <AttendanceMonthGrid
             month={loadedMonth}
